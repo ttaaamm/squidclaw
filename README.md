@@ -30,7 +30,8 @@ is molten, habit is crystallized.
 
 ## Status
 
-**Phase 1 — Heartbeat.** It thinks, acts, speaks, and remembers. It does not yet
+**Phase 1 — Heartbeat.** It thinks, acts, speaks, and remembers — both this
+conversation and what it chose to keep. It does not yet
 form habits (Phase 2), fire reflexes (Phase 3), or show you its mind (Phase 4).
 
 ## Anatomy
@@ -39,16 +40,23 @@ form habits (Phase 2), fire reflexes (Phase 3), or show you its mind (Phase 4).
 workspace/              # the agent's body
 ├── INNERME.md          # WHO IT IS
 ├── BRAINS.yaml         # HOW IT THINKS — tiers → models, never hardcoded
+├── memory/*.md         # WHAT IT KNOWS — facts it chose to keep, in plain markdown
 └── journal/            # WHAT IT HAS LIVED — every execution, every step
 
 packages/
 ├── kernel/     # the spine: items, registry, journal, graph walker. No LLM, no chat.
 ├── brains/     # one interface, many minds — tier routing with fallback
+├── memory/     # episodic (this conversation) + semantic (durable facts)
 ├── agent/      # the improviser: thinking, recorded as a graph
-├── nodes/      # what it can do: echo, http.request
+├── nodes/      # what it can do: echo, http.request, memory.remember, memory.recall
 ├── surfaces/   # its faces: telegram, terminal
 └── server/     # runners + journal CLI
 ```
+
+Memory is a **tool**, not a feature bolted on: the agent decides for itself what
+is worth keeping and goes looking when something feels familiar. What it keeps
+lands in `workspace/memory/` as plain markdown — greppable, git-diffable,
+editable by you. An agent whose mind you can read is an agent you can trust.
 
 ## Run it
 
@@ -63,7 +71,7 @@ npm run journal -- show <id>
 ```
 
 ```bash
-npm test        # 17 tests
+npm test        # 28 tests
 npm run typecheck
 ```
 
