@@ -132,9 +132,11 @@ resilience, and plan-tier pricing for the hosted service.
 
 ## 6. Deployment & distribution
 
-**Hosted (launch):** one Node process + Postgres + nginx on the aljoodbs
-box (76.13.49.186), dev at `/opt/agenticflow`, localhost-only until
-explicit go → then `flow.preplix.ai` (DNS + TLS + systemd). Multi-tenant
+**Hosted (launch):** one Node process + Postgres + nginx on the **Preplix
+VPS (187.77.162.34)** — Tamer's pick: the species grows on the box that
+already hosts squidclaw.dev. Dev at `/opt/agenticflow` (name avoids any
+collision with legacy squidclaw installs), localhost-only until explicit
+go → then `flow.preplix.ai` (DNS + TLS + systemd). Multi-tenant
 single instance. No Kubernetes, no Redis until load demands.
 
 **Self-host (v1.1, guaranteed by architecture):** docker compose / npx,
@@ -145,8 +147,8 @@ lives on our side: metered brains, WhatsApp number, hosted dashboard, sync.
 
 | Box | Names | Hosts |
 |---|---|---|
-| Preplix VPS · 187.77.162.34 | preplix.ai, squidclaw.dev | TARS (legacy), product landing page |
-| aljoodbs · 76.13.49.186 | n8n.preplix.ai, aljoodbs.com, flow.preplix.ai (planned) | n8n, Saudi Times bots, Ash (legacy), **new build** |
+| Preplix VPS · 187.77.162.34 | preplix.ai, squidclaw.dev, flow.preplix.ai (planned) | TARS (legacy), product landing page, **new build** |
+| aljoodbs · 76.13.49.186 | n8n.preplix.ai, aljoodbs.com | n8n, Saudi Times bots, Ash (legacy) — reference environment |
 
 `squidclaw.dev` (owned, static page, Preplix VPS) becomes the product's
 brand home. TARS and Ash continue on squidclaw-legacy, untouched; they may
@@ -185,5 +187,5 @@ specs.
 | Brains | Multi-model router, tier-based, BYOK-capable |
 | Client UX | Agent-first; canvas read-only in dashboard |
 | Distribution | Hosted at launch; self-host v1.1 (architecture guarantees) |
-| Dev host | aljoodbs box, /opt/agenticflow, localhost until go |
+| Dev host | Preplix VPS (187.77.162.34), /opt/agenticflow, localhost until go |
 | Name | **SquidClaw** (the species). Old fork = squidclaw-legacy. Home: squidclaw.dev |
