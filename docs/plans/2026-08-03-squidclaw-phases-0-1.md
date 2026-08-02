@@ -34,7 +34,7 @@ N8N/                                  (repo root, already has docs/)
 ├── vitest.config.ts  .gitignore  .env.example
 ├── .github/workflows/ci.yml
 ├── workspace/                        # the dev agent's body (spec §2)
-│   ├── SOUL.md  BRAINS.yaml
+│   ├── INNERME.md  BRAINS.yaml
 │   └── journal/                      # executions.db lives here (gitignored)
 └── packages/
     ├── kernel/src/{types,registry,journal,walker,index}.ts + test/
@@ -688,7 +688,7 @@ tiers:
 ### Task 7: Agent — the improviser
 
 **Files:**
-- Create: `packages/agent/src/improviser.ts`; Modify: `packages/agent/src/index.ts`; Test: `packages/agent/test/improviser.test.ts`; Create: `workspace/SOUL.md`
+- Create: `packages/agent/src/improviser.ts`; Modify: `packages/agent/src/index.ts`; Test: `packages/agent/test/improviser.test.ts`; Create: `workspace/INNERME.md`
 
 **Interfaces:**
 - Consumes: `Brains.complete` (Task 6), `listNodes/getNode` + `Journal` (kernel).
@@ -805,10 +805,10 @@ export class Agent {
 ```
 
 `index.ts`: `export * from "./improviser.js";`
-`workspace/SOUL.md`:
+`workspace/INNERME.md`:
 
 ```markdown
-# SOUL
+# INNER ME
 You are SquidClaw — a habit-forming agent. You complete tasks by calling tools.
 Prefer acting over explaining. When a task is done, reply with one short,
 plain-language sentence describing the result. Never invent tool results.
@@ -930,7 +930,7 @@ if (!process.env.ANTHROPIC_API_KEY) { console.error("ANTHROPIC_API_KEY missing")
 registerBuiltinNodes();
 const journal = new Journal(join(WORKSPACE, "journal", "executions.db"));
 const brains = new Brains(loadBrainsConfig(join(WORKSPACE, "BRAINS.yaml")));
-const soul = readFileSync(join(WORKSPACE, "SOUL.md"), "utf8");
+const soul = readFileSync(join(WORKSPACE, "INNERME.md"), "utf8");
 const agent = new Agent({ brains, journal, tenantId: "dev", soul });
 const surface = new TelegramSurface(token, (_chatId, text) => agent.handleMessage(text));
 await surface.start();

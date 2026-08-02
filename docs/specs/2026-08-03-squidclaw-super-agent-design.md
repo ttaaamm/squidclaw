@@ -60,7 +60,7 @@ step visible in the dashboard.
 
 ```
 agent/
-├── SOUL.md            # WHO IT IS — persona, voice, values, boundaries
+├── INNERME.md            # WHO IT IS — persona, voice, values, boundaries
 ├── memory/            # WHAT IT KNOWS — facts, people, preferences (*.md)
 ├── flows/             # WHAT IT KNOWS HOW TO DO — procedural memory
 │   ├── *.flow.json    #   crystallized habits, authored by the agent
