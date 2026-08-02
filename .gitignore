@@ -1,0 +1,6 @@
+node_modules/
+.env
+workspace/journal/
+*.db
+*.db-wal
+*.db-shm
