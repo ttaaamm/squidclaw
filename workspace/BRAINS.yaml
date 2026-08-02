@@ -1,0 +1,5 @@
+# HOW IT THINKS — tiers map to models, in fallback order.
+# Never hardcode a model in code. Swapping a brain is a config change.
+tiers:
+  cheap: [claude-haiku-4-5-20251001]
+  strong: [claude-opus-5, claude-sonnet-5]
