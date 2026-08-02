@@ -11,6 +11,7 @@
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json",
     "dev": "tsx packages/server/src/dev.ts",
+    "heartbeat": "tsx packages/server/src/heartbeat.ts",
     "journal": "tsx packages/server/src/cli.ts"
   },
   "devDependencies": {
