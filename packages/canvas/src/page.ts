@@ -103,6 +103,11 @@ const ago = (iso) => {
 const dur = (ms) => ms == null ? '' : ms < 1000 ? ms + 'ms' : (ms/1000).toFixed(1) + 's';
 
 let state = null, runs = [], selected = null, selectedNode = null;
+let showRoutine = false;
+
+// The canvas is for real work. A run earns its place by being a habit run or
+// genuinely multi-step; plain chat and one-tool fetches are routine.
+const isSignificant = (e) => e.kind === "flow" || e.steps >= 2;
 
 async function load() {
   [state, runs] = await Promise.all([
@@ -143,22 +148,33 @@ function renderSide() {
     '<b>' + esc(r.name) + '</b><span class="when">' + esc(r.cron || 'POST /hooks/' + r.webhook) + '</span></div>' +
     '<div class="shape">runs ' + esc(r.flow) + '</div></div>').join('');
 
-  const runRows = runs.map(e =>
+  const visible = showRoutine ? runs : runs.filter(isSignificant);
+  const hidden = runs.length - (showRoutine ? runs.length : visible.length);
+  const runRows = visible.map(e =>
     '<button class="row" data-run="' + e.id + '" aria-current="' + (e.id === selected) + '"><div class="top">' +
     '<span class="dot ' + e.status + '"></span><span class="kind ' + e.kind + '">' + e.kind + '</span>' +
     '<span class="when">' + ago(e.startedAt) + (e.durationMs != null ? ' · ' + dur(e.durationMs) : '') + '</span></div>' +
     '<div class="shape">' + esc(e.shape) + '</div></button>').join('');
 
+  const routineToggle =
+    '<button class="row" id="routine-toggle" style="color:var(--dim);font-size:12px">' +
+    (showRoutine ? 'hide routine runs' : (hidden > 0 ? 'show ' + hidden + ' routine run' + (hidden === 1 ? '' : 's') + ' (chat, single steps)' : '')) +
+    '</button>';
+
   $('#side').innerHTML =
     (habitRows ? group('Habits — runs without thinking', habitRows) : '') +
     (draftRows ? group('Draft habits', draftRows) : '') +
     (reflexRows ? group('Reflexes', reflexRows) : '') +
-    group('What it has lived', runRows || '<p class="empty">Nothing yet.</p>');
+    group('Flows it has run',
+      (runRows || '<p class="empty">No real flows yet — multi-step work lands here.</p>') +
+      ((showRoutine || hidden > 0) ? routineToggle : ''));
 
   $('#side').querySelectorAll('[data-run]').forEach(b =>
     b.onclick = () => openRun(b.dataset.run));
   $('#side').querySelectorAll('[data-habit]').forEach(b =>
     b.onclick = () => openHabit(b.dataset.habit));
+  const toggle = $('#routine-toggle');
+  if (toggle) toggle.onclick = () => { showRoutine = !showRoutine; renderSide(); };
 }
 
 async function openHabit(name) {
