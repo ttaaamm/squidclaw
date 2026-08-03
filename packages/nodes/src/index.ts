@@ -6,7 +6,8 @@ import { webSearchNode, webReadNode } from "./web.js";
 import { pdfCreateNode, pptxCreateNode } from "./documents.js";
 import { n8nImportNode, unsupportedNode } from "./n8n-import.js";
 import { telegramSendNode } from "./telegram.js";
-import { gotenbergRenderNode } from "./gotenberg.js";
+import { visionLookNode, voiceSayNode, transcribeNode } from "./senses.js";
+import { gotenbergRenderNode, canvasSnapNode } from "./gotenberg.js";
 
 export * from "./echo.js";
 export * from "./http-request.js";
@@ -17,6 +18,7 @@ export * from "./n8n-import.js";
 export * from "./mcp.js";
 export * from "./telegram.js";
 export * from "./gotenberg.js";
+export * from "./senses.js";
 
 export function registerBuiltinNodes(): void {
   for (const node of [
@@ -32,6 +34,10 @@ export function registerBuiltinNodes(): void {
     unsupportedNode,
     telegramSendNode(),
     gotenbergRenderNode(),
+    canvasSnapNode(),
+    visionLookNode(),
+    voiceSayNode(),
+    transcribeNode(),
   ]) {
     registerNode(node);
   }

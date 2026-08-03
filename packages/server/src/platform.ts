@@ -3,12 +3,12 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { Journal } from "@squidclaw/kernel";
 import type { Mind } from "@squidclaw/brains";
-import { ConversationStore, SemanticMemory, memoryNodes } from "@squidclaw/memory";
+import { ConversationStore, SemanticMemory, memoryNodes, taskList, taskNodes } from "@squidclaw/memory";
 import {
   Agent, FlowStore, VibeState, loadVibes,
   answerHatching, beginHatching, birthAnnouncement, type HatchState,
 } from "@squidclaw/agent";
-import { ReflexStore, Scheduler } from "@squidclaw/reflexes";
+import { ReflexStore, Scheduler, reminderNodes } from "@squidclaw/reflexes";
 import { AgentPool, TenantStore, PLANS, type Tenant } from "@squidclaw/tenants";
 import { habitRunner, handleCommand, type Booted } from "./boot.js";
 
@@ -70,8 +70,9 @@ export class Platform {
       flows,
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
-      // Memory tools hold this tenant's data — private to this agent, never global.
-      extraNodes: memoryNodes(memory),
+      // Tools holding this tenant's data are private to this agent, never global:
+      // its memories, its human's todo list, its own reminders.
+      extraNodes: [...memoryNodes(memory), ...taskNodes(taskList(dir)), ...reminderNodes(reflexes)],
     });
 
     const organism: Booted = {
@@ -99,7 +100,10 @@ export class Platform {
         this.tenants.record(tenant.id, "habit");
         return out;
       },
-      { onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`) },
+      {
+        say: (m) => notify(m),
+        onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`),
+      },
     );
     scheduler.start();
     this.schedulers.set(tenant.id, scheduler);
@@ -312,13 +316,13 @@ export class Platform {
       if (token && req.headers["x-squidclaw-token"] !== token) return send(401, { error: "bad token" });
 
       const owners = this.warmOrganisms().filter(({ organism }) =>
-        organism.reflexes.enabled().some((r) => r.webhook === match[1]),
+        organism.reflexes.enabled().some((r) => r.webhook === match[1] && r.flow),
       );
       if (!owners.length) return send(404, { error: `no armed reflex for hook "${match[1]}"` });
       if (owners.length > 1) console.warn(`hook "${match[1]}" armed by ${owners.length} tenants — first wins`);
 
       const { tenantId, organism } = owners[0];
-      const reflex = organism.reflexes.enabled().find((r) => r.webhook === match[1])!;
+      const reflex = organism.reflexes.enabled().find((r) => r.webhook === match[1] && r.flow)!;
 
       let raw = "";
       req.on("data", (c: Buffer) => (raw += c));
@@ -334,7 +338,7 @@ export class Platform {
             const denied = this.tenants.checkQuota(tenantId, "habit");
             if (denied) return send(429, { error: denied });
             const run = habitRunner(organism, (m) => this.opts.notify?.(tenantId, m));
-            const result = await run(reflex.flow, args);
+            const result = await run(reflex.flow!, args);
             organism.reflexes.recordRun(reflex.name, "ok");
             this.tenants.record(tenantId, "habit");
             send(200, { ok: true, reflex: reflex.name, result });

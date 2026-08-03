@@ -31,7 +31,19 @@ export interface AgentOptions {
    * tenant's data must come through here instead.
    */
   extraNodes?: NodeDef[];
+  /** Passively extract durable facts from each exchange (cheap brain). Default on when memory exists. */
+  extractFacts?: boolean;
+  /** Read pasted links into context automatically. Default on. */
+  autoRead?: boolean;
 }
+
+const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
+const AUTO_READ_CHARS = 4_000;
+
+const EXTRACT_SCHEMA_HINT =
+  'Reply ONLY with JSON: {"facts":[{"name":"short-slug","content":"the fact"}]} — durable facts about the human ' +
+  "(preferences, names, rules, relationships, plans). Not small talk, not what they asked this once. " +
+  'If nothing is worth keeping: {"facts":[]}';
 
 /**
  * The improviser: thinking, recorded as a graph.
@@ -84,6 +96,63 @@ export class Agent {
       this.opts.extraNodes?.find((n) => n.name === name) ??
       getNode(name)
     );
+  }
+
+  /**
+   * The passive ear: after answering, a cheap-brain pass quietly extracts
+   * durable facts from the exchange. This is what makes an agent feel like it
+   * knows you — remembering things you never told it to remember.
+   * Fire-and-forget; a failed extraction must never break a conversation.
+   */
+  private extractFacts(userText: string, reply: string): void {
+    const { memory, brains } = this.opts;
+    if (!memory || this.opts.extractFacts === false) return;
+    void (async () => {
+      try {
+        const res = await brains.complete({
+          tier: "cheap",
+          system: EXTRACT_SCHEMA_HINT,
+          messages: [{ role: "user", content: `HUMAN: ${userText}\nAGENT: ${reply}` }],
+          maxTokens: 400,
+        });
+        const start = res.text.indexOf("{");
+        const end = res.text.lastIndexOf("}");
+        if (start === -1 || end <= start) return;
+        const parsed = JSON.parse(res.text.slice(start, end + 1)) as {
+          facts?: Array<{ name: string; content: string }>;
+        };
+        for (const fact of (parsed.facts ?? []).slice(0, 3)) {
+          if (fact?.name && fact?.content) memory.remember(fact.name, fact.content);
+        }
+      } catch {
+        // Silence is correct: passive memory is a bonus, never a failure mode.
+      }
+    })();
+  }
+
+  /**
+   * The auto-link reader: a pasted URL gets fetched into context before the
+   * brain ever thinks, and the fetch is journaled like any other step.
+   */
+  private async autoReadLink(
+    text: string,
+    journalStep: (nodeName: string, params: Record<string, unknown>, output: Item[], error?: string) => void,
+  ): Promise<string | null> {
+    if (this.opts.autoRead === false) return null;
+    const url = text.match(URL_IN_TEXT)?.[0];
+    if (!url) return null;
+    const reader = this.resolve("web.read");
+    if (!reader) return null;
+    try {
+      const output = await reader.run({ url, maxChars: AUTO_READ_CHARS }, [], { tenantId: this.opts.tenantId });
+      journalStep("web.read", { url, auto: true }, output);
+      const page = output[0]?.json as { text?: string } | undefined;
+      if (!page?.text) return null;
+      return `[Content of ${url}]:\n${page.text}`;
+    } catch (err) {
+      journalStep("web.read", { url, auto: true }, [], String(err));
+      return null;
+    }
   }
 
   /**
@@ -150,16 +219,41 @@ export class Agent {
     const graph: Graph = { nodes: [], edges: [] };
     const execId = journal.begin({ tenantId, kind: "improvised", graph });
 
+    let reply = "";
+    let seq = 0;
+    let prevNodeId: string | null = null;
+
+    const journalStep = (
+      nodeName: string,
+      params: Record<string, unknown>,
+      output: Item[],
+      error?: string,
+    ): void => {
+      const nodeId = `n${++seq}`;
+      graph.nodes.push({ id: nodeId, node: nodeName, params });
+      if (prevNodeId) graph.edges.push({ from: prevNodeId, to: nodeId });
+      prevNodeId = nodeId;
+      journal.recordStep(execId, {
+        nodeId, node: nodeName, params, input: [], output,
+        status: error ? "error" : "ok", error,
+        startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+      });
+    };
+
+    // A pasted link is read before thinking starts — context arrives with the question.
+    let content = text;
+    if (URL_IN_TEXT.test(text)) {
+      onProgress?.("reading the link…");
+      const pageContext = await this.autoReadLink(text, journalStep);
+      if (pageContext) content = `${text}\n\n${pageContext}`;
+    }
+
     // Episodic memory: what was just said, so it never forgets you mid-sentence.
     const history = (conversation?.recent(tenantId, chatId) ?? []).map((t) => ({
       role: t.role,
       content: t.content,
     }));
-    const messages: unknown[] = [...history, { role: "user", content: text }];
-
-    let reply = "";
-    let seq = 0;
-    let prevNodeId: string | null = null;
+    const messages: unknown[] = [...history, { role: "user", content }];
 
     try {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
@@ -236,6 +330,7 @@ export class Agent {
       reply = reply || "I did the work but couldn't wrap it into an answer — the journal has the details.";
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
+      this.extractFacts(text, reply); // fire-and-forget: the passive ear
 
       // Only work that actually did something is worth remembering how to do.
       if (graph.nodes.length) {

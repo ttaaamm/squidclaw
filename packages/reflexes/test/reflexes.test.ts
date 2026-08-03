@@ -37,7 +37,7 @@ describe("reflex store", () => {
   });
 
   it("refuses a reflex with no trigger at all", () => {
-    expect(() => store.save(reflex({ cron: undefined, webhook: undefined }))).toThrow(/cron schedule or a webhook/);
+    expect(() => store.save(reflex({ cron: undefined, webhook: undefined }))).toThrow(/cron schedule, a webhook path, or a one-shot time/);
   });
 
   it("rejects a bad schedule when it's saved, not when it should fire", () => {

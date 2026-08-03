@@ -51,7 +51,7 @@ export class WebhookServer {
       return send(401, { error: "bad token" });
     }
 
-    const reflex = this.store.enabled().find((r) => r.webhook === match[1]);
+    const reflex = this.store.enabled().find((r) => r.webhook === match[1] && r.flow);
     if (!reflex) return send(404, { error: `no enabled reflex for hook "${match[1]}"` });
 
     let args: Record<string, unknown> = { ...(reflex.args ?? {}) };
@@ -63,7 +63,7 @@ export class WebhookServer {
     }
 
     try {
-      const result = await this.runHabit(reflex.flow, args);
+      const result = await this.runHabit(reflex.flow!, args);
       this.store.recordRun(reflex.name, "ok");
       this.opts.onFire?.(reflex.name, "ok");
       send(200, { ok: true, reflex: reflex.name, result });

@@ -12,6 +12,7 @@ const notify = (message: string) => console.log(`\n${message}\n`);
 const runHabit = habitRunner(booted, notify);
 
 const scheduler = new Scheduler(reflexes, runHabit, {
+  say: (m) => notify(m),
   onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`),
 });
 scheduler.start();

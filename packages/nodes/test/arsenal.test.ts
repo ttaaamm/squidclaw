@@ -157,8 +157,9 @@ describe("the arsenal is registered", () => {
     clearNodes();
     registerBuiltinNodes();
     expect(listNodes().map((n) => n.name).sort()).toEqual([
-      "echo", "gotenberg.render", "http.request", "n8n.import", "pdf.create", "pptx.create",
-      "shell.exec", "ssh.exec", "telegram.send", "unsupported.node", "web.read", "web.search",
+      "audio.transcribe", "canvas.snap", "echo", "gotenberg.render", "http.request",
+      "n8n.import", "pdf.create", "pptx.create", "shell.exec", "ssh.exec",
+      "telegram.send", "unsupported.node", "vision.look", "voice.say", "web.read", "web.search",
     ]);
   });
 });

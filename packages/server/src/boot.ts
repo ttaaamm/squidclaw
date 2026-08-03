@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { Journal } from "@squidclaw/kernel";
 import { registerBuiltinNodes, registerMcpServers, type McpConfig } from "@squidclaw/nodes";
 import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains";
-import { ConversationStore, SemanticMemory, registerMemoryNodes } from "@squidclaw/memory";
+import { ConversationStore, SemanticMemory, registerMemoryNodes, taskList, taskNodes } from "@squidclaw/memory";
 import { Agent, FlowStore, VibeState, heal, loadVibes } from "@squidclaw/agent";
-import { ReflexStore, Scheduler, WebhookServer } from "@squidclaw/reflexes";
+import { ReflexStore, Scheduler, WebhookServer, reminderNodes } from "@squidclaw/reflexes";
 import { listNodes, type ExecutionRecord } from "@squidclaw/kernel";
 
 /**
@@ -125,6 +125,8 @@ export async function bootAgent(): Promise<Booted> {
     flows,
     tenantId: "dev",
     innerMe: readFileSync(join(workspace, "INNERME.md"), "utf8"),
+    // Personal tools, same as a tenant would get: todo list and reminders.
+    extraNodes: [...taskNodes(taskList(workspace)), ...reminderNodes(reflexes)],
   });
 
   return { agent, vibes, flows, reflexes, journal, memory, workspace, via, mcp };

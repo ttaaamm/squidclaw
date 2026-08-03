@@ -35,14 +35,23 @@ export function telegramSendNode(opts: TelegramSendOptions = {}): NodeDef {
       const binary = items.find((i) => i.binary?.data)?.binary?.data;
 
       if (params.filename && binary) {
+        const filename = String(params.filename).toLowerCase();
+        // The file's nature picks the message type: images show inline,
+        // audio arrives as a playable voice note, the rest as documents.
+        const [method, field] = /\.(png|jpe?g|gif|webp)$/.test(filename)
+          ? ["sendPhoto", "photo"]
+          : /\.(mp3|ogg|oga|opus|m4a)$/.test(filename)
+            ? ["sendVoice", "voice"]
+            : ["sendDocument", "document"];
+
         const form = new FormData();
         form.append("chat_id", String(params.chatId));
         if (params.text) form.append("caption", String(params.text));
-        form.append("document", new Blob([new Uint8Array(binary)]), String(params.filename));
-        const res = await fetch(`${api}/sendDocument`, { method: "POST", body: form });
+        form.append(field, new Blob([new Uint8Array(binary)]), String(params.filename));
+        const res = await fetch(`${api}/${method}`, { method: "POST", body: form });
         const body = (await res.json()) as { ok: boolean; description?: string };
         if (!body.ok) throw new Error(`telegram.send: ${body.description ?? `HTTP ${res.status}`}`);
-        return [{ json: { sent: true, kind: "document", filename: params.filename } }];
+        return [{ json: { sent: true, kind: field, filename: params.filename } }];
       }
 
       if (!params.text) throw new Error("telegram.send: nothing to send — give me text, or a filename plus binary input");

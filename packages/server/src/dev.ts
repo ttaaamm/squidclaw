@@ -27,6 +27,7 @@ surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, async (chatId, te
 await surface.start();
 
 const scheduler = new Scheduler(reflexes, runHabit, {
+  say: (m) => notify(m),
   onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`),
 });
 scheduler.start();

@@ -47,3 +47,41 @@ export function gotenbergRenderNode(opts: GotenbergOptions = {}): NodeDef {
     },
   };
 }
+
+/**
+ * Canvas-to-chat: render HTML into a PNG — charts, dashboards, visual reports
+ * that land in the conversation as an image instead of a link.
+ */
+export function canvasSnapNode(opts: GotenbergOptions = {}): NodeDef {
+  return {
+    name: "canvas.snap",
+    description:
+      "Render HTML into a PNG image (charts, tables, visual reports to show in chat). Params: html (required, a full HTML document), filename (default canvas.png), width (px, default 800). The image flows onward as binary — chain telegram.send with the filename to deliver it.",
+    inputSchema: {
+      type: "object",
+      required: ["html"],
+      properties: {
+        html: { type: "string" },
+        filename: { type: "string" },
+        width: { type: "number" },
+      },
+    },
+    run: async (params) => {
+      const base = opts.baseUrl ?? process.env.GOTENBERG_URL ?? "http://127.0.0.1:3000";
+      const form = new FormData();
+      form.append("files", new Blob([String(params.html)], { type: "text/html" }), "index.html");
+      form.append("format", "png");
+      form.append("width", String(params.width ?? 800));
+
+      const res = await fetch(`${base}/forms/chromium/screenshot/html`, { method: "POST", body: form });
+      if (!res.ok) {
+        const detail = (await res.text()).slice(0, 300);
+        throw new Error(`canvas.snap: HTTP ${res.status} — ${detail}`);
+      }
+
+      const png = Buffer.from(await res.arrayBuffer());
+      const filename = String(params.filename ?? "canvas.png");
+      return [{ json: { filename, bytes: png.length, kind: "image" }, binary: { data: png } }];
+    },
+  };
+}

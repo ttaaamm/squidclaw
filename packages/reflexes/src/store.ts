@@ -2,16 +2,20 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFile
 import { join } from "node:path";
 import { parseCron } from "./cron.js";
 
-/** A standing commitment: run this habit when this happens, without being asked. */
+/** A standing commitment: act when this happens, without being asked. */
 export interface Reflex {
   name: string;
-  /** The habit to run — a promoted flow's name. */
-  flow: string;
+  /** The habit to run — a promoted flow's name. Either this or `message`. */
+  flow?: string;
+  /** A reminder: just say this to the human when firing. Either this or `flow`. */
+  message?: string;
   args?: Record<string, unknown>;
   /** 5-field cron, or an alias like @daily. */
   cron?: string;
   /** Webhook path segment: POST /hooks/<webhook> fires it. */
   webhook?: string;
+  /** One-shot: fire once at this ISO time, then disarm itself. */
+  at?: string;
   enabled: boolean;
   createdAt: string;
   lastRun?: string;
@@ -41,10 +45,16 @@ export class ReflexStore {
   }
 
   save(reflex: Reflex): void {
-    if (!reflex.cron && !reflex.webhook) {
-      throw new Error(`reflex "${reflex.name}" needs a cron schedule or a webhook path`);
+    if (!reflex.cron && !reflex.webhook && !reflex.at) {
+      throw new Error(`reflex "${reflex.name}" needs a cron schedule, a webhook path, or a one-shot time`);
+    }
+    if (!reflex.flow && !reflex.message) {
+      throw new Error(`reflex "${reflex.name}" needs something to do — a habit to run, or a message to say`);
     }
     if (reflex.cron) parseCron(reflex.cron); // fail loudly now, not at 3am
+    if (reflex.at && Number.isNaN(Date.parse(reflex.at))) {
+      throw new Error(`reflex "${reflex.name}": "${reflex.at}" is not a valid time`);
+    }
     writeFileSync(join(this.dir, `${reflex.name}.trigger.json`), `${JSON.stringify(reflex, null, 2)}\n`, "utf8");
   }
 
