@@ -178,7 +178,12 @@ export class Platform {
     return "Usage: /tenants · /tenant new <name> [plan] · /tenant plan <id> <plan> · /tenant on|off <id> · /tenant token <id>";
   }
 
-  async handle(surface: string, chatId: string, text: string): Promise<string> {
+  async handle(
+    surface: string,
+    chatId: string,
+    text: string,
+    progress?: (note: string) => void,
+  ): Promise<string> {
     const trimmed = text.trim();
     const admin = this.isAdmin(surface, chatId);
 
@@ -220,7 +225,7 @@ export class Platform {
     const denied = this.tenants.checkQuota(tenant.id, "thought");
     if (denied) return `⏳ ${denied}`;
 
-    const reply = await organism.agent.handleMessage(text, chatId);
+    const reply = await organism.agent.handleMessage(text, chatId, progress);
     this.tenants.record(tenant.id, "thought");
     return reply;
   }

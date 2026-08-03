@@ -37,8 +37,8 @@ const platform = new Platform({
   },
 });
 
-surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, (chatId, text) =>
-  platform.handle("telegram", chatId, text),
+surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, (chatId, text, progress) =>
+  platform.handle("telegram", chatId, text, progress),
 );
 await surface.start();
 

@@ -135,7 +135,11 @@ export class Agent {
     return parts.join("\n\n");
   }
 
-  async handleMessage(text: string, chatId = "default"): Promise<string> {
+  async handleMessage(
+    text: string,
+    chatId = "default",
+    onProgress?: (note: string) => void,
+  ): Promise<string> {
     const { brains, journal, tenantId, conversation } = this.opts;
     const tools: ToolSpec[] = this.available().map((n) => ({
       name: toToolName(n.name),
@@ -159,6 +163,7 @@ export class Agent {
 
     try {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
+        onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",
           system: this.systemPrompt(chatId),
@@ -174,6 +179,7 @@ export class Agent {
         const toolResults: unknown[] = [];
         for (const call of res.toolCalls) {
           const nodeName = toNodeName(call.name);
+          onProgress?.(`running ${nodeName}…`);
           const def = this.resolve(nodeName);
           const nodeId = `n${++seq}`;
           graph.nodes.push({ id: nodeId, node: nodeName, params: call.input });

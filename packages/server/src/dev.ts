@@ -21,8 +21,8 @@ const notify = (message: string) => {
 
 const runHabit = habitRunner(booted, notify);
 
-surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, async (chatId, text) => {
-  return handleCommand(text, booted, chatId) ?? (await agent.handleMessage(text, chatId));
+surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, async (chatId, text, progress) => {
+  return handleCommand(text, booted, chatId) ?? (await agent.handleMessage(text, chatId, progress));
 });
 await surface.start();
 

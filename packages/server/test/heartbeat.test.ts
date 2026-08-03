@@ -49,7 +49,7 @@ describe("heartbeat: telegram -> agent -> brains -> node -> journal -> reply", (
     const brains = new Brains({ tiers: { cheap: ["m"], strong: ["m"] } }, async () => responses[i++]);
     const agent = new Agent({ brains, journal, tenantId: "dev", innerMe: "I am SquidClaw." });
 
-    const surface = new TelegramSurface("tkn", (_c, text) => agent.handleMessage(text), botInfo);
+    const surface = new TelegramSurface("tkn", (_c, text) => agent.handleMessage(text), { botInfo });
     const sent: Record<string, unknown>[] = [];
     surface.bot.api.config.use(async (_prev, _method, payload) => {
       sent.push(payload as Record<string, unknown>);
@@ -59,7 +59,8 @@ describe("heartbeat: telegram -> agent -> brains -> node -> journal -> reply", (
     await surface.bot.handleUpdate(update("fetch the zen and tell me what it says"));
 
     // It spoke.
-    expect(String(sent[0].text)).toContain("Non-blocking is better than blocking");
+    const spoken = sent.filter((s) => typeof s.text === "string");
+    expect(String(spoken[0].text)).toContain("Non-blocking is better than blocking");
 
     // And it remembered — as a graph, in workflow shape, ready to crystallize.
     const [rec] = journal.list({ tenantId: "dev" });
