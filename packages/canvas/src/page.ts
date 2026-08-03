@@ -223,7 +223,7 @@ function svg(L, nodes) {
     const name = imported ? String(info.params.n8nName) : n.node;
     const label = name.length > 22 ? name.slice(0, 21) + '…' : name;
     const sub = imported
-      ? 'needs native · ' + (info.status || 'not run')
+      ? 'n8n · ' + (info.status || 'not run') + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '')
       : (info.status || 'not run') + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '');
     return '<g class="n" data-node="' + n.id + '" data-status="' + (info.status || '') + '">' +
       '<rect x="' + n.x + '" y="' + n.y + '" width="' + n.width + '" height="' + n.height + '" rx="9"/>' +
