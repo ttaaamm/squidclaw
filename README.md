@@ -87,14 +87,48 @@ packages/
 Everything except the journal is human-readable text — auditable, git-diffable
 minds. An agent whose mind you can read is an agent you can trust.
 
+## Habits — the part nobody else has
+
+Do the same work twice and it writes itself a habit:
+
+```
+you › Fetch https://api.github.com/zen and tell me what it says.
+    › It says: "Non-blocking is better than blocking."
+
+you › Now fetch https://api.github.com/octocat and tell me what it says.
+    › It's the Octocat ASCII art, saying "Avoid administrative distraction."
+
+      💡 I've done this 2 times now, so I wrote it down as a habit:
+         http-request (asks for: url). Say `/promote http-request`
+         and I'll stop thinking it through every time.
+
+you › /promote http-request
+    › Promoted. I'll run it directly from now on.
+```
+
+What it wrote for itself — constants baked in, the part that varied opened up:
+
+```json
+{ "name": "http-request", "params": ["url"], "runs": 2,
+  "graph": { "nodes": [{ "node": "http.request",
+    "params": { "url": "{{url}}", "method": "GET" } }], "edges": [] } }
+```
+
+That habit then runs in **~500 ms with zero LLM calls** — where improvising it
+cost a full round-trip and tokens every single time. It never promotes itself;
+habits wait in `flows/_drafts/` until a human says yes.
+
+`/habits` to see them · `/promote <name>` to bless one · they're plain JSON you
+can read, edit, and version.
+
 ## Status
 
-**Phase 1 — Heartbeat, complete.** It thinks, acts, speaks, and remembers. It
-does not yet form habits (Phase 2), fire reflexes (Phase 3), or show you its
-mind on a canvas (Phase 4).
+**Phase 2 — First habit, complete.** It thinks, acts, speaks, remembers, and
+now forms habits from its own successful work. It does not yet fire reflexes
+on a schedule (Phase 3) or show you its mind on a canvas (Phase 4).
 
 ```bash
-npm test        # 53 tests
+npm test        # 70 tests
 npm run typecheck
 ```
 

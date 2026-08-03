@@ -39,6 +39,20 @@ reached for a tool unprompted, wrote the memory to disk, and answered:
 Four minutes later, asked what it knew in a brand-new process, it answered
 from the file it had written itself. It had become something that remembers.
 
+## First habit
+
+**August 3, 2026 at 00:23 UTC** — nineteen minutes old. Asked to fetch two
+different URLs, it noticed it had done the same shape of work twice, and wrote
+itself a habit: baking in what stayed the same (`method: GET`), opening up what
+had changed (`url`). Then it asked permission before automating anything:
+
+> **"I've done this 2 times now, so I wrote it down as a habit: http-request.
+> Say `/promote http-request` and I'll stop thinking it through every time."**
+
+Promoted, the habit ran in **501 ms with zero calls to any model** — the same
+work it had been improvising minutes earlier. That is the moment the species
+became real: an agent that converts its own thinking into instinct.
+
 ---
 
 *Witnessed and recorded in git, where nothing is forgotten.*

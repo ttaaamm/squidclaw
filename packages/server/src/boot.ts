@@ -4,7 +4,7 @@ import { Journal } from "@squidclaw/kernel";
 import { registerBuiltinNodes, registerMcpServers, type McpConfig } from "@squidclaw/nodes";
 import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains";
 import { ConversationStore, SemanticMemory, registerMemoryNodes } from "@squidclaw/memory";
-import { Agent, VibeState, loadVibes } from "@squidclaw/agent";
+import { Agent, FlowStore, VibeState, loadVibes } from "@squidclaw/agent";
 
 /**
  * Two doors to the same mind.
@@ -26,6 +26,7 @@ export function chooseMind(workspace: string): { mind: Mind; via: "api" | "cli" 
 export interface Booted {
   agent: Agent;
   vibes: VibeState;
+  flows: FlowStore;
   workspace: string;
   via: "api" | "cli";
   mcp: { registered: string[]; failed: Record<string, string> };
@@ -50,17 +51,20 @@ export async function bootAgent(): Promise<Booted> {
   const vibesPath = join(workspace, "VIBES.yaml");
   const vibes = new VibeState(loadVibes(existsSync(vibesPath) ? vibesPath : undefined));
 
+  const flows = new FlowStore(join(workspace, "flows"));
+
   const agent = new Agent({
     brains: mind,
     journal: new Journal(join(workspace, "journal", "executions.db")),
     conversation: new ConversationStore(join(workspace, "journal", "conversation.db")),
     memory,
     vibes,
+    flows,
     tenantId: "dev",
     innerMe: readFileSync(join(workspace, "INNERME.md"), "utf8"),
   });
 
-  return { agent, vibes, workspace, via, mcp };
+  return { agent, vibes, flows, workspace, via, mcp };
 }
 
 export function requireEnv(...names: string[]): void {
@@ -73,13 +77,41 @@ export function requireEnv(...names: string[]): void {
 }
 
 /** Chat commands that belong to the body, not the mind. */
-export function handleCommand(input: string, vibes: VibeState, chatId: string): string | null {
+export function handleCommand(input: string, ctx: Booted, chatId: string): string | null {
+  const { vibes, flows, agent } = ctx;
   const [cmd, arg] = input.trim().split(/\s+/, 2);
+
   if (cmd === "/vibe") {
     if (!arg) return `Current vibe: ${vibes.current(chatId)}. Available: ${vibes.list().join(", ")}`;
     return vibes.set(chatId, arg)
       ? `Vibe set to ${arg}.`
       : `No such vibe "${arg}". Available: ${vibes.list().join(", ")}`;
   }
+
+  if (cmd === "/habits") {
+    const promoted = flows.promoted();
+    const drafts = flows.drafts();
+    if (!promoted.length && !drafts.length) return "No habits yet — I'm still improvising everything.";
+    const line = (f: { name: string; runs: number; params: string[] }) =>
+      `  ${f.name} (${f.runs} runs${f.params.length ? `, needs ${f.params.join(", ")}` : ""})`;
+    return [
+      promoted.length ? `Habits I run without thinking:\n${promoted.map(line).join("\n")}` : "",
+      drafts.length ? `Waiting on your yes (/promote <name>):\n${drafts.map(line).join("\n")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (cmd === "/promote") {
+    if (!arg) return "Which habit? Try /habits to see the drafts.";
+    if (!flows.promote(arg)) return `No draft habit called "${arg}".`;
+    const added = agent.registerHabits();
+    return `Promoted **${arg}**. I'll run it directly from now on${added.length ? ` (available as ${added.join(", ")})` : ""}.`;
+  }
+
+  if (cmd === "/help") {
+    return "Commands: /habits · /promote <name> · /vibe <name> · exit";
+  }
+
   return null;
 }

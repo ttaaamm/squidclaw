@@ -1,7 +1,9 @@
-import { getNode, listNodes, type Graph, type Item, type Journal } from "@squidclaw/kernel";
+import { getNode, listNodes, registerNode, type Graph, type Item, type Journal } from "@squidclaw/kernel";
 import type { Mind, ToolSpec } from "@squidclaw/brains";
 import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
+import { flowNode, type FlowStore } from "./flows.js";
+import { crystallize, findRepeatedWork } from "./crystallizer.js";
 
 // Anthropic tool names can't contain dots; node "http.request" <-> tool "http__request".
 const toToolName = (nodeName: string) => nodeName.replaceAll(".", "__");
@@ -19,6 +21,10 @@ export interface AgentOptions {
   conversation?: ConversationStore;
   memory?: SemanticMemory;
   vibes?: VibeState;
+  /** Where habits live. Without it the agent improvises forever, like every other agent. */
+  flows?: FlowStore;
+  /** How many times the same work must succeed before it becomes a habit. */
+  crystallizeAfter?: number;
 }
 
 /**
@@ -29,7 +35,52 @@ export interface AgentOptions {
  * makes crystallization (Phase 2) nearly free: the habit is already written down.
  */
 export class Agent {
-  constructor(private opts: AgentOptions) {}
+  constructor(private opts: AgentOptions) {
+    this.registerHabits();
+  }
+
+  /** Promoted habits become tools, so the agent can reach for a skill it already has. */
+  registerHabits(): string[] {
+    const { flows, journal } = this.opts;
+    if (!flows) return [];
+    const names: string[] = [];
+    for (const flow of flows.promoted()) {
+      const def = flowNode(flow, journal);
+      if (getNode(def.name)) continue;
+      registerNode(def);
+      names.push(def.name);
+    }
+    return names;
+  }
+
+  /**
+   * Looks back at what it just did, and at everything before it. Work done
+   * enough times becomes a draft habit — waiting on a human's yes, never
+   * self-promoting.
+   */
+  private formHabit(chatId: string, trigger: string): string | null {
+    const { flows, journal, tenantId, conversation } = this.opts;
+    if (!flows) return null;
+
+    const minRuns = this.opts.crystallizeAfter ?? 2;
+    const candidates = findRepeatedWork(journal, tenantId, { minRuns });
+    if (!candidates.length) return null;
+
+    // Recent turns give the habit its trigger phrases — what people actually say to ask for it.
+    const said = (conversation?.recent(tenantId, chatId) ?? [])
+      .filter((t) => t.role === "user")
+      .map((t) => t.content);
+
+    for (const candidate of candidates) {
+      if (flows.hasSignature(candidate.signature)) continue;
+      const flow = crystallize(candidate, [...new Set([...said.slice(-2), trigger])].filter(Boolean));
+      flows.saveDraft(flow);
+      return `\n\n💡 I've done this ${flow.runs} times now, so I wrote it down as a habit: **${flow.name}**${
+        flow.params.length ? ` (asks for: ${flow.params.join(", ")})` : ""
+      }. Say \`/promote ${flow.name}\` and I'll stop thinking it through every time.`;
+    }
+    return null;
+  }
 
   /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
   private systemPrompt(chatId: string): string {
@@ -127,6 +178,12 @@ export class Agent {
       reply = reply || "(I ran out of thinking turns — check the journal.)";
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
+
+      // Only work that actually did something is worth remembering how to do.
+      if (graph.nodes.length) {
+        const formed = this.formHabit(chatId, text);
+        if (formed) return reply + formed;
+      }
       return reply;
     } catch (err) {
       journal.setGraph(execId, graph);

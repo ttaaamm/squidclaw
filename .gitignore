@@ -1,6 +1,8 @@
 node_modules/
 .env
 workspace/journal/
+workspace/memory/
+workspace/flows/
 *.db
 *.db-wal
 *.db-shm
