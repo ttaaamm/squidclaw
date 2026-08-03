@@ -6,7 +6,7 @@ import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains
 import { ConversationStore, SemanticMemory, registerMemoryNodes } from "@squidclaw/memory";
 import { Agent, FlowStore, VibeState, heal, loadVibes } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, WebhookServer } from "@squidclaw/reflexes";
-import { getNode, listNodes, type ExecutionRecord } from "@squidclaw/kernel";
+import { listNodes, type ExecutionRecord } from "@squidclaw/kernel";
 
 /**
  * Two doors to the same mind.
@@ -45,7 +45,7 @@ export interface Booted {
  */
 export function habitRunner(booted: Booted, notify: (message: string) => void) {
   return async (flowName: string, args: Record<string, unknown>): Promise<unknown> => {
-    const node = getNode(`flow.${flowName}`);
+    const node = booted.agent.habit(flowName);
     if (!node) throw new Error(`no promoted habit called "${flowName}"`);
 
     const attempt = async () => node.run(args, [], { tenantId: "dev" });

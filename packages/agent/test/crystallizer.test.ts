@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { clearNodes, getNode, registerNode, Journal, type Graph } from "@squidclaw/kernel";
+import { clearNodes, registerNode, Journal, type Graph } from "@squidclaw/kernel";
 import { Brains } from "@squidclaw/brains";
 import { ConversationStore } from "@squidclaw/memory";
 import {
@@ -147,9 +147,9 @@ describe("a habit, dressed as a tool", () => {
     });
     // The constructor already wired habits in; calling again is a no-op.
     expect(agent.registerHabits()).toEqual([]);
-    expect(getNode("flow.search-it")).toBeDefined();
+    expect(agent.habit("search-it")).toBeDefined();
 
-    const out = await getNode("flow.search-it")!.run({ topic: "squid" }, [], { tenantId: "t" });
+    const out = await agent.habit("search-it")!.run({ topic: "squid" }, [], { tenantId: "t" });
     expect(calls).toEqual([{ query: "squid" }]);
     expect(out[0].json.hit).toBe("result for squid");
   });
@@ -167,8 +167,10 @@ describe("a habit, dressed as a tool", () => {
     });
     store.promote("fragile");
 
-    new Agent({ brains: null as never, journal: new Journal(":memory:"), tenantId: "t", innerMe: "", flows: store });
-    await expect(getNode("flow.fragile")!.run({}, [], { tenantId: "t" })).rejects.toThrow(/upstream down/);
+    const agent = new Agent({
+      brains: null as never, journal: new Journal(":memory:"), tenantId: "t", innerMe: "", flows: store,
+    });
+    await expect(agent.habit("fragile")!.run({}, [], { tenantId: "t" })).rejects.toThrow(/upstream down/);
   });
 });
 

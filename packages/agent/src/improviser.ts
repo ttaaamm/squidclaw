@@ -1,4 +1,4 @@
-import { getNode, listNodes, registerNode, type Graph, type Item, type Journal } from "@squidclaw/kernel";
+import { getNode, listNodes, type Graph, type Item, type Journal, type NodeDef } from "@squidclaw/kernel";
 import type { Mind, ToolSpec } from "@squidclaw/brains";
 import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
@@ -35,6 +35,15 @@ export interface AgentOptions {
  * makes crystallization (Phase 2) nearly free: the habit is already written down.
  */
 export class Agent {
+  /**
+   * Habits live on the agent, not in the global registry.
+   *
+   * Two tenants share the builtin nodes but must never see each other's
+   * skills — and a habit named "daily-report" means something different to
+   * each of them.
+   */
+  private habits = new Map<string, NodeDef>();
+
   constructor(private opts: AgentOptions) {
     this.registerHabits();
   }
@@ -43,14 +52,28 @@ export class Agent {
   registerHabits(): string[] {
     const { flows, journal } = this.opts;
     if (!flows) return [];
-    const names: string[] = [];
+    const added: string[] = [];
     for (const flow of flows.promoted()) {
       const def = flowNode(flow, journal);
-      if (getNode(def.name)) continue;
-      registerNode(def);
-      names.push(def.name);
+      if (this.habits.has(def.name)) continue;
+      this.habits.set(def.name, def);
+      added.push(def.name);
     }
-    return names;
+    return added;
+  }
+
+  /** A habit this agent owns, by bare name or full node name. */
+  habit(name: string): NodeDef | undefined {
+    return this.habits.get(name.startsWith("flow.") ? name : `flow.${name}`);
+  }
+
+  /** Everything it can reach for: shared tools plus its own skills. */
+  private available(): NodeDef[] {
+    return [...listNodes(), ...this.habits.values()];
+  }
+
+  private resolve(name: string): NodeDef | undefined {
+    return this.habits.get(name) ?? getNode(name);
   }
 
   /**
@@ -104,7 +127,7 @@ export class Agent {
 
   async handleMessage(text: string, chatId = "default"): Promise<string> {
     const { brains, journal, tenantId, conversation } = this.opts;
-    const tools: ToolSpec[] = listNodes().map((n) => ({
+    const tools: ToolSpec[] = this.available().map((n) => ({
       name: toToolName(n.name),
       description: n.description,
       input_schema: n.inputSchema,
@@ -141,7 +164,7 @@ export class Agent {
         const toolResults: unknown[] = [];
         for (const call of res.toolCalls) {
           const nodeName = toNodeName(call.name);
-          const def = getNode(nodeName);
+          const def = this.resolve(nodeName);
           const nodeId = `n${++seq}`;
           graph.nodes.push({ id: nodeId, node: nodeName, params: call.input });
           if (prevNodeId) graph.edges.push({ from: prevNodeId, to: nodeId });
