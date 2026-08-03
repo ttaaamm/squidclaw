@@ -140,7 +140,7 @@ describe("n8n import", () => {
   it("loads a workflow from disk through the node", async () => {
     const path = join(dir(), "wf.json");
     writeFileSync(path, JSON.stringify({ name: "disk flow", nodes: [{ name: "N", type: "n8n-nodes-base.noOp" }] }));
-    const out = await getNode("n8n.import")!.run({ path }, [], { tenantId: "t" });
+    const out = await getNode("squidflow.import")!.run({ path }, [], { tenantId: "t" });
     expect(out[0].json.name).toBe("disk flow");
     expect(out[0].json.nodes).toBe(1);
   });
@@ -158,9 +158,10 @@ describe("the arsenal is registered", () => {
     registerBuiltinNodes();
     expect(listNodes().map((n) => n.name).sort()).toEqual([
       "audio.transcribe", "browser.snap", "canvas.snap", "doc.read", "echo",
-      "email.read", "email.send", "gotenberg.render", "http.request", "n8n.import",
-      "pdf.create", "pptx.create", "shell.exec", "ssh.exec", "telegram.poll",
-      "telegram.send", "unsupported.node", "vision.look", "voice.say", "web.read", "web.search",
+      "email.read", "email.send", "gotenberg.render", "http.request",
+      "pdf.create", "pptx.create", "shell.exec", "squidflow.import", "ssh.exec",
+      "telegram.poll", "telegram.send", "unsupported.node", "vision.look",
+      "voice.say", "web.read", "web.search",
     ]);
   });
 });

@@ -95,9 +95,9 @@ export const unsupportedNode: NodeDef = {
 };
 
 export const n8nImportNode: NodeDef = {
-  name: "n8n.import",
+  name: "squidflow.import",
   description:
-    "Load an exported n8n workflow JSON file and convert it into a runnable graph. Params: path (to the .json file, required). Returns the graph, plus any node types that have no native equivalent yet.",
+    "Import an n8n-exported workflow JSON file as a SquidFlow — a runnable graph. Params: path (to the .json file, required). Returns the SquidFlow graph, plus any node types that have no native equivalent yet.",
   inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } },
   run: async (params) => {
     const wf = JSON.parse(readFileSync(String(params.path), "utf8")) as N8nWorkflow;

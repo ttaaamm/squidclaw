@@ -153,7 +153,7 @@ function renderSide() {
   const hidden = runs.length - (showRoutine ? runs.length : visible.length);
   const runRows = visible.map(e =>
     '<button class="row" data-run="' + e.id + '" aria-current="' + (e.id === selected) + '"><div class="top">' +
-    '<span class="dot ' + e.status + '"></span><span class="kind ' + e.kind + '">' + e.kind + '</span>' +
+    '<span class="dot ' + e.status + '"></span><span class="kind ' + e.kind + '">' + (e.kind === 'flow' ? 'squidflow' : e.kind) + '</span>' +
     '<span class="when">' + ago(e.startedAt) + (e.durationMs != null ? ' · ' + dur(e.durationMs) : '') + '</span></div>' +
     '<div class="shape">' + esc(e.shape) + '</div></button>').join('');
 
@@ -166,8 +166,8 @@ function renderSide() {
     (habitRows ? group('Habits — runs without thinking', habitRows) : '') +
     (draftRows ? group('Draft habits', draftRows) : '') +
     (reflexRows ? group('Reflexes', reflexRows) : '') +
-    group('Workflow runs',
-      (runRows || '<p class="empty">No workflow runs yet — when you /promote a habit, its runs land here.</p>') +
+    group('SquidFlow runs',
+      (runRows || '<p class="empty">No SquidFlow runs yet — when you /promote a habit, its runs land here.</p>') +
       ((showRoutine || hidden > 0) ? routineToggle : ''));
 
   $('#side').querySelectorAll('[data-run]').forEach(b =>
