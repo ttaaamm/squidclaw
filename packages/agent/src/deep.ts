@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
@@ -120,6 +120,11 @@ export function writeMcpConfig(shimPath: string, bridge: ToolBridge): string {
     }),
     "utf8",
   );
+  // The CLI may run sandboxed as another user (TARS-style wrappers do exactly
+  // this) — the config must be readable across that boundary. It holds only a
+  // loopback URL and a token that dies with this one run.
+  chmodSync(dir, 0o755);
+  chmodSync(path, 0o644);
   return path;
 }
 
