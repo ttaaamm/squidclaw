@@ -72,14 +72,17 @@ workspace/              # the agent's body
 ├── BRAINS.yaml         # HOW IT THINKS — tiers → models, never hardcoded
 ├── mcp.json            # BORROWED TOOLS (optional)
 ├── memory/*.md         # WHAT IT KNOWS — facts it chose to keep
+├── flows/*.flow.json   # WHAT IT KNOWS HOW TO DO — habits it wrote itself
+├── reflexes/           # ITS INSTINCTS — standing cron and webhook triggers
 └── journal/            # WHAT IT HAS LIVED — every execution, every step
 
 packages/
 ├── kernel/     # the spine: items, registry, journal, graph walker. No LLM, no chat.
 ├── brains/     # one interface, many minds — API router + CLI brain
 ├── memory/     # episodic (this conversation) + semantic (durable facts)
-├── agent/      # the improviser + vibes: thinking, recorded as a graph
+├── agent/      # improviser, vibes, crystallizer, healer
 ├── nodes/      # what it can do — web, shell, ssh, documents, mcp, n8n import
+├── reflexes/   # cron engine, trigger store, scheduler, webhook server
 ├── surfaces/   # its faces: telegram, terminal
 └── server/     # runners + journal CLI
 ```
@@ -121,14 +124,55 @@ habits wait in `flows/_drafts/` until a human says yes.
 `/habits` to see them · `/promote <name>` to bless one · they're plain JSON you
 can read, edit, and version.
 
-## Status
+## Reflexes — it acts without being asked
 
-**Phase 2 — First habit, complete.** It thinks, acts, speaks, remembers, and
-now forms habits from its own successful work. It does not yet fire reflexes
-on a schedule (Phase 3) or show you its mind on a canvas (Phase 4).
+A habit only becomes useful when nobody has to trigger it. Arm one and it fires
+on a schedule, or when the world knocks:
+
+```
+you › /reflex morning daily-report 0 9 * * *
+    › Reflex morning armed — I'll run daily-report on "0 9 * * *" without being asked.
+
+you › /reflex on-order make-invoice hook:order
+    › Reflex on-order armed — POST /hooks/order will run make-invoice.
+```
 
 ```bash
-npm test        # 70 tests
+curl -X POST localhost:4100/hooks/order -d '{"customer":"Al Jood","amount":500}'
+```
+
+The cron engine is written here rather than borrowed — five fields, ranges,
+steps, names, aliases, and cron's own day-of-month/day-of-week quirk — because
+the thing that decides when an agent acts unasked should have no mystery in it.
+Bad schedules are rejected when you save them, not at 3am.
+
+## Healing — it fixes itself, or wakes you properly
+
+When a habit fails, it reads its own journal and decides what kind of failure
+it was:
+
+| | |
+|---|---|
+| **the world was flaky** (`ECONNRESET`, `503`, timeouts) | retries with exponential backoff, then reports if it still won't work |
+| **the habit is wrong** (unknown node, `404`, missing param) | never retries — wakes you immediately, because waiting won't help |
+| **unrecognised** | says so honestly rather than guessing |
+
+```
+⚠️ habit "flaky": Tried 3 times over 7s and it kept failing —
+   http.request: the world was flaky — TypeError: fetch failed.
+```
+
+No stack traces at 3am. Set `SQUIDCLAW_HOME_CHAT` and those reports arrive on
+Telegram.
+
+## Status
+
+**Phase 3 — Reflexes & healing, complete.** It thinks, acts, speaks, remembers,
+forms habits, fires them unasked, and repairs itself. It does not yet show you
+its mind on a canvas (Phase 4) or serve multiple tenants (Phase 5).
+
+```bash
+npm test        # 116 tests
 npm run typecheck
 ```
 

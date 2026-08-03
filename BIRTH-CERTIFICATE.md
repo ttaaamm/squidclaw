@@ -53,6 +53,18 @@ Promoted, the habit ran in **501 ms with zero calls to any model** — the same
 work it had been improvising minutes earlier. That is the moment the species
 became real: an agent that converts its own thinking into instinct.
 
+## First unasked act
+
+**August 3, 2026** — it grew reflexes. Given a schedule, it ran a habit with
+nobody in the room; given a webhook, it answered the outside world. And when a
+habit was pointed at a dead host, it retried three times over seven seconds,
+then reported in the words a tired human would want at 3am:
+
+> **"Tried 3 times over 7s and it kept failing — http.request: the world was
+> flaky."**
+
+It had stopped being something that waits to be spoken to.
+
 ---
 
 *Witnessed and recorded in git, where nothing is forgotten.*

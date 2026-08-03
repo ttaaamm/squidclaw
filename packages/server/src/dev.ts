@@ -1,19 +1,44 @@
 import "dotenv/config";
 import { listNodes } from "@squidclaw/kernel";
 import { TelegramSurface } from "@squidclaw/surfaces";
-import { bootAgent, handleCommand, requireEnv } from "./boot.js";
+import { Scheduler, WebhookServer } from "@squidclaw/reflexes";
+import { bootAgent, habitRunner, handleCommand, requireEnv } from "./boot.js";
 
 requireEnv("TELEGRAM_BOT_TOKEN");
 
 const booted = await bootAgent();
-const { agent, flows, via, mcp } = booted;
+const { agent, flows, reflexes, via, mcp } = booted;
 
-const surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, async (chatId, text) => {
+/** Where the agent speaks when nobody asked it anything — reflex reports, healing news. */
+const homeChat = process.env.SQUIDCLAW_HOME_CHAT;
+let surface: TelegramSurface;
+
+const notify = (message: string) => {
+  console.log(message);
+  if (homeChat) void surface.bot.api.sendMessage(homeChat, message).catch(() => {});
+};
+
+const runHabit = habitRunner(booted, notify);
+
+surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, async (chatId, text) => {
   return handleCommand(text, booted, chatId) ?? (await agent.handleMessage(text, chatId));
 });
 await surface.start();
 
+const scheduler = new Scheduler(reflexes, runHabit, {
+  onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`),
+});
+scheduler.start();
+
+const hooks = new WebhookServer(reflexes, runHabit, {
+  token: process.env.SQUIDCLAW_WEBHOOK_TOKEN,
+  onFire: (name, status, detail) => notify(`🪝 hook "${name}" — ${status}${detail ? `: ${detail}` : ""}`),
+});
+const port = await hooks.listen(Number(process.env.SQUIDCLAW_PORT ?? 4100));
+
 console.log(`🫀 SquidClaw heartbeat: listening on Telegram (long-polling). Ctrl+C to stop.`);
 console.log(`   thinking via: ${via} · tools: ${listNodes().length}${mcp.registered.length ? ` (${mcp.registered.length} via MCP)` : ""}`);
 console.log(`   habits: ${flows.promoted().length} learned, ${flows.drafts().length} awaiting your yes`);
+console.log(`   reflexes: ${reflexes.enabled().length} armed · hooks on http://127.0.0.1:${port}`);
+if (!homeChat) console.log(`   (set SQUIDCLAW_HOME_CHAT to a chat id to get reflex + healing reports on Telegram)`);
 for (const [server, err] of Object.entries(mcp.failed)) console.log(`   ⚠️  MCP "${server}" failed: ${err}`);

@@ -4,7 +4,9 @@ import { Journal } from "@squidclaw/kernel";
 import { registerBuiltinNodes, registerMcpServers, type McpConfig } from "@squidclaw/nodes";
 import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains";
 import { ConversationStore, SemanticMemory, registerMemoryNodes } from "@squidclaw/memory";
-import { Agent, FlowStore, VibeState, loadVibes } from "@squidclaw/agent";
+import { Agent, FlowStore, VibeState, heal, loadVibes } from "@squidclaw/agent";
+import { ReflexStore, Scheduler, WebhookServer } from "@squidclaw/reflexes";
+import { getNode, type ExecutionRecord } from "@squidclaw/kernel";
 
 /**
  * Two doors to the same mind.
@@ -27,9 +29,67 @@ export interface Booted {
   agent: Agent;
   vibes: VibeState;
   flows: FlowStore;
+  reflexes: ReflexStore;
+  journal: Journal;
   workspace: string;
   via: "api" | "cli";
   mcp: { registered: string[]; failed: Record<string, string> };
+}
+
+/**
+ * Runs a habit, and if it stumbles, tries to pick it back up.
+ *
+ * Transient trouble gets retried quietly; a genuinely broken habit reaches a
+ * human in plain language instead of dying in a log nobody reads.
+ */
+export function habitRunner(booted: Booted, notify: (message: string) => void) {
+  return async (flowName: string, args: Record<string, unknown>): Promise<unknown> => {
+    const node = getNode(`flow.${flowName}`);
+    if (!node) throw new Error(`no promoted habit called "${flowName}"`);
+
+    const attempt = async () => node.run(args, [], { tenantId: "dev" });
+    try {
+      return await attempt();
+    } catch (err) {
+      const [failed] = booted.journal.list({ tenantId: "dev", limit: 1 });
+      const record: ExecutionRecord = failed ?? {
+        id: "unknown", tenantId: "dev", kind: "flow", status: "error",
+        graph: { nodes: [], edges: [] }, startedAt: new Date().toISOString(),
+        steps: [{
+          nodeId: "n1", node: flowName, params: args, input: [], output: [],
+          status: "error", error: String(err),
+          startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+        }],
+      };
+
+      let output: unknown;
+      const result = await heal(
+        record,
+        // A retry that fails must report a failed run, not throw — otherwise
+        // healing stops at the first attempt and nobody ever gets told.
+        async (): Promise<ExecutionRecord> => {
+          try {
+            output = await attempt();
+            return { ...record, status: "ok", steps: [] };
+          } catch (retryErr) {
+            const latest = booted.journal.list({ tenantId: "dev", limit: 1 })[0];
+            if (latest?.status === "error") return latest;
+            return {
+              ...record,
+              steps: record.steps.map((s) => ({ ...s, error: String(retryErr) })),
+            };
+          }
+        },
+        { notify: (m) => notify(`⚠️ habit "${flowName}": ${m}`) },
+      );
+
+      if (result.healed) {
+        notify(`✅ habit "${flowName}" recovered after ${result.attempts} ${result.attempts === 1 ? "retry" : "retries"}.`);
+        return output;
+      }
+      throw err;
+    }
+  };
 }
 
 /** Assembles the whole organism from a workspace directory. One body, many faces. */
@@ -52,10 +112,12 @@ export async function bootAgent(): Promise<Booted> {
   const vibes = new VibeState(loadVibes(existsSync(vibesPath) ? vibesPath : undefined));
 
   const flows = new FlowStore(join(workspace, "flows"));
+  const reflexes = new ReflexStore(join(workspace, "reflexes"));
+  const journal = new Journal(join(workspace, "journal", "executions.db"));
 
   const agent = new Agent({
     brains: mind,
-    journal: new Journal(join(workspace, "journal", "executions.db")),
+    journal,
     conversation: new ConversationStore(join(workspace, "journal", "conversation.db")),
     memory,
     vibes,
@@ -64,7 +126,7 @@ export async function bootAgent(): Promise<Booted> {
     innerMe: readFileSync(join(workspace, "INNERME.md"), "utf8"),
   });
 
-  return { agent, vibes, flows, workspace, via, mcp };
+  return { agent, vibes, flows, reflexes, journal, workspace, via, mcp };
 }
 
 export function requireEnv(...names: string[]): void {
@@ -109,8 +171,58 @@ export function handleCommand(input: string, ctx: Booted, chatId: string): strin
     return `Promoted **${arg}**. I'll run it directly from now on${added.length ? ` (available as ${added.join(", ")})` : ""}.`;
   }
 
+  if (cmd === "/reflexes") {
+    const all = ctx.reflexes.all();
+    if (!all.length) return "No reflexes yet. Add one with /reflex <name> <habit> <cron…>";
+    return all
+      .map(
+        (r) =>
+          `  ${r.enabled ? "●" : "○"} ${r.name} → ${r.flow} ${
+            r.cron ? `on "${r.cron}"` : `on POST /hooks/${r.webhook}`
+          }${r.lastRun ? ` · last ${r.lastStatus} at ${r.lastRun.slice(0, 16).replace("T", " ")}` : ""}`,
+      )
+      .join("\n");
+  }
+
+  if (cmd === "/reflex") {
+    const [, name, flow, ...rest] = input.trim().split(/\s+/);
+    const when = rest.join(" ");
+    if (!name || !flow || !when) {
+      return 'Usage: /reflex <name> <habit> <cron or hook:path>\ne.g. /reflex morning daily-report 0 9 * * *\n     /reflex on-order make-invoice hook:order';
+    }
+    if (!ctx.flows.promoted().some((f) => f.name === flow)) {
+      return `"${flow}" isn't a promoted habit yet. /habits to see what's available.`;
+    }
+    try {
+      const webhook = when.startsWith("hook:") ? when.slice(5) : undefined;
+      ctx.reflexes.save({
+        name, flow, enabled: true, createdAt: new Date().toISOString(),
+        ...(webhook ? { webhook } : { cron: when }),
+      });
+      return webhook
+        ? `Reflex **${name}** armed — POST /hooks/${webhook} will run ${flow}.`
+        : `Reflex **${name}** armed — I'll run ${flow} on "${when}" without being asked.`;
+    } catch (err) {
+      return `Couldn't arm that: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  if (cmd === "/unreflex") {
+    if (!arg) return "Which reflex? /reflexes to see them.";
+    return ctx.reflexes.remove(arg) ? `Reflex **${arg}** removed.` : `No reflex called "${arg}".`;
+  }
+
   if (cmd === "/help") {
-    return "Commands: /habits · /promote <name> · /vibe <name> · exit";
+    return [
+      "Commands:",
+      "  /habits              what I've learned to do without thinking",
+      "  /promote <name>      bless a draft habit",
+      "  /reflexes            standing triggers",
+      "  /reflex <name> <habit> <cron|hook:path>   arm one",
+      "  /unreflex <name>     disarm one",
+      "  /vibe <name>         how I speak",
+      "  exit",
+    ].join("\n");
   }
 
   return null;
