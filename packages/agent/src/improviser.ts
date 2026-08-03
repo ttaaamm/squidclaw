@@ -9,7 +9,7 @@ import { crystallize, findRepeatedWork } from "./crystallizer.js";
 const toToolName = (nodeName: string) => nodeName.replaceAll(".", "__");
 const toNodeName = (toolName: string) => toolName.replaceAll("__", ".");
 
-const MAX_TURNS = 8;
+const MAX_TURNS = 12;
 /** Memories are cheap to carry but not free — hand it a digest, let it recall the rest. */
 const MEMORY_DIGEST_LIMIT = 20;
 
@@ -212,9 +212,28 @@ export class Agent {
         messages.push({ role: "user", content: toolResults });
       }
 
+      // Out of turns with no answer? Take the tools away and make it conclude —
+      // the human deserves its best summary, not an apology about turn limits.
+      if (!reply) {
+        onProgress?.("wrapping up…");
+        const final = await brains.complete({
+          tier: "strong",
+          system: this.systemPrompt(chatId),
+          messages: [
+            ...messages,
+            {
+              role: "user",
+              content:
+                "Stop — no more tools. Give your best final answer from what you found so far, in plain language.",
+            },
+          ],
+        });
+        reply = final.text;
+      }
+
       journal.setGraph(execId, graph);
       journal.finish(execId, "ok");
-      reply = reply || "(I ran out of thinking turns — check the journal.)";
+      reply = reply || "I did the work but couldn't wrap it into an answer — the journal has the details.";
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
 

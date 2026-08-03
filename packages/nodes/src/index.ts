@@ -24,7 +24,7 @@ export function registerBuiltinNodes(): void {
     httpRequestNode,
     shellExecNode,
     sshExecNode,
-    webSearchNode,
+    webSearchNode(),
     webReadNode,
     pdfCreateNode,
     pptxCreateNode,
