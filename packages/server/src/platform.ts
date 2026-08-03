@@ -1,10 +1,13 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { Journal } from "@squidclaw/kernel";
 import type { Mind } from "@squidclaw/brains";
 import { ConversationStore, SemanticMemory, memoryNodes } from "@squidclaw/memory";
-import { Agent, FlowStore, VibeState, loadVibes } from "@squidclaw/agent";
+import {
+  Agent, FlowStore, VibeState, loadVibes,
+  answerHatching, beginHatching, birthAnnouncement, type HatchState,
+} from "@squidclaw/agent";
 import { ReflexStore, Scheduler } from "@squidclaw/reflexes";
 import { AgentPool, TenantStore, PLANS, type Tenant } from "@squidclaw/tenants";
 import { habitRunner, handleCommand, type Booted } from "./boot.js";
@@ -120,8 +123,68 @@ export class Platform {
     return [...this.organisms.entries()].map(([tenantId, organism]) => ({ tenantId, organism }));
   }
 
+  /** A tenant's organism, building it if it isn't warm yet. */
+  organismFor(tenantId: string): Promise<Booted> {
+    return this.pool.for(tenantId);
+  }
+
   private isAdmin(surface: string, chatId: string): boolean {
     return this.admins.has(`${surface}:${chatId}`) || this.admins.has(chatId);
+  }
+
+  // --- hatching -------------------------------------------------------------
+
+  private tenantDir(tenantId: string): string {
+    return this.pool.workspaceFor(tenantId).dir;
+  }
+
+  private hatched(tenantId: string): boolean {
+    return existsSync(join(this.tenantDir(tenantId), ".hatched"));
+  }
+
+  private hatchStatePath(tenantId: string): string {
+    return join(this.tenantDir(tenantId), "HATCHING.json");
+  }
+
+  /** Runs the birth ritual for an unhatched tenant. Returns the next thing to say. */
+  private hatchStep(tenantId: string, text: string): string {
+    const dir = this.tenantDir(tenantId);
+    mkdirSync(dir, { recursive: true });
+    const statePath = this.hatchStatePath(tenantId);
+
+    if (!existsSync(statePath)) {
+      const { state, question } = beginHatching();
+      writeFileSync(statePath, JSON.stringify(state), "utf8");
+      return question;
+    }
+
+    const state = JSON.parse(readFileSync(statePath, "utf8")) as HatchState;
+    const next = answerHatching(state, text);
+
+    if (!next.result) {
+      writeFileSync(statePath, JSON.stringify(next.state), "utf8");
+      return next.question!;
+    }
+
+    // Born: identity written by its human's own answers, then the body wakes.
+    writeFileSync(join(dir, "INNERME.md"), next.result.innerMe, "utf8");
+    const memoryDir = join(dir, "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    for (const memory of next.result.memories) {
+      writeFileSync(join(memoryDir, `${memory.name}.md`), `${memory.content}\n`, "utf8");
+    }
+    writeFileSync(join(dir, ".hatched"), new Date().toISOString(), "utf8");
+    rmSync(statePath, { force: true });
+    this.evictOrganism(tenantId); // rebuild with the newborn identity
+    return birthAnnouncement(next.result);
+  }
+
+  /** Fully forget a warm organism — pool, scheduler, and the warm map together. */
+  private evictOrganism(tenantId: string): void {
+    this.schedulers.get(tenantId)?.stop();
+    this.schedulers.delete(tenantId);
+    this.organisms.delete(tenantId);
+    this.pool.evict(tenantId);
   }
 
   private adminCommand(input: string): string {
@@ -155,18 +218,13 @@ export class Platform {
     if (sub === "plan" && parts[2] && parts[3]) {
       if (!(parts[3] in PLANS)) return `Plans: ${Object.keys(PLANS).join(", ")}`;
       if (!this.tenants.setPlan(parts[2], parts[3])) return `No tenant "${parts[2]}".`;
-      this.pool.evict(parts[2]);
+      this.evictOrganism(parts[2]);
       return `${parts[2]} moved to ${parts[3]}.`;
     }
 
     if ((sub === "off" || sub === "on") && parts[2]) {
       if (!this.tenants.setEnabled(parts[2], sub === "on")) return `No tenant "${parts[2]}".`;
-      if (sub === "off") {
-        this.schedulers.get(parts[2])?.stop();
-        this.schedulers.delete(parts[2]);
-        this.organisms.delete(parts[2]);
-        this.pool.evict(parts[2]);
-      }
+      if (sub === "off") this.evictOrganism(parts[2]);
       return `${parts[2]} is now ${sub === "on" ? "enabled" : "disabled"}.`;
     }
 
@@ -197,8 +255,12 @@ export class Platform {
       const tenant = this.tenants.byToken(token);
       if (!tenant) return "That invite doesn't match any account — check it with whoever sent it.";
       this.tenants.bind(surface, chatId, tenant.id);
+      // A new agent doesn't say welcome — it asks who it is. The birth ritual.
+      if (!this.hatched(tenant.id)) {
+        return `Welcome — this chat now belongs to **${tenant.name}**.\n\n${this.hatchStep(tenant.id, "")}`;
+      }
       await this.pool.for(tenant.id);
-      return `Welcome — this chat now belongs to **${tenant.name}**. Just tell me what eats your time, and I'll start learning it.`;
+      return `Welcome back — this chat now belongs to **${tenant.name}**.`;
     }
 
     const tenant = this.tenants.tenantFor(surface, chatId);
@@ -208,6 +270,9 @@ export class Platform {
         : "Hi — I'm SquidClaw, an agent that learns your routine work until it runs itself.\nThis chat isn't connected yet: if you have an invite, say /join <token>.";
     }
     if (!tenant.enabled) return "This account is currently disabled.";
+
+    // Mid-ritual messages continue the ritual — nothing else happens until it's born.
+    if (!this.hatched(tenant.id)) return this.hatchStep(tenant.id, text);
 
     const organism = await this.pool.for(tenant.id);
 

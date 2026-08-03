@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { clearNodes, registerNode } from "@squidclaw/kernel";
@@ -34,11 +34,20 @@ function makePlatform(responses?: unknown[]) {
   return { platform, root, seen };
 }
 
+/** Joins a chat to a tenant and walks the whole birth ritual. */
+async function joinAndHatch(platform: Platform, chatId: string, token: string, name = "Agent") {
+  await platform.handle("telegram", chatId, `/join ${token}`);
+  await platform.handle("telegram", chatId, name);
+  await platform.handle("telegram", chatId, "a test human");
+  await platform.handle("telegram", chatId, "testing");
+  await platform.handle("telegram", chatId, "warm");
+}
+
 describe("the platform", () => {
   beforeEach(clearNodes);
 
-  it("walks a stranger through the door: onboarding -> invite -> bound chat", async () => {
-    const { platform } = makePlatform([says("Hello Al Jood!")]);
+  it("walks a stranger through the door: onboarding -> invite -> birth ritual -> bound chat", async () => {
+    const { platform, root } = makePlatform([says("Hello Al Jood!")]);
 
     // A stranger gets the pitch, not an agent.
     const stranger = await platform.handle("telegram", "111", "hello?");
@@ -49,9 +58,26 @@ describe("the platform", () => {
     expect(created).toContain("Al Jood");
     const token = created.match(/\/join (\S+)/)![1];
 
-    // The client joins, and from then on just talks.
+    // Joining starts the birth ritual — a new agent asks who it is.
     const welcome = await platform.handle("telegram", "111", `/join ${token}`);
     expect(welcome).toContain("Al Jood");
+    expect(welcome).toContain("What should my name be");
+
+    expect(await platform.handle("telegram", "111", "Sanad")).toContain("who are you");
+    expect(await platform.handle("telegram", "111", "Khalid from Al Jood")).toContain("purpose");
+    expect(await platform.handle("telegram", "111", "handle our invoices")).toContain("how should I speak");
+    const born = await platform.handle("telegram", "111", "formal");
+    expect(born).toContain("I'm Sanad");
+
+    // The identity its human gave it is now written in its body.
+    const id = platform.tenants.tenantFor("telegram", "111")!.id;
+    const innerMe = readFileSync(join(root, "tenants", id, "INNERME.md"), "utf8");
+    expect(innerMe).toContain("I am Sanad");
+    expect(innerMe).toContain("Khalid");
+    expect(innerMe).toContain("invoices");
+    expect(readFileSync(join(root, "tenants", id, "memory", "my-purpose.md"), "utf8")).toContain("invoices");
+
+    // Ritual over: from now on it just talks — with its new identity in the prompt.
     const reply = await platform.handle("telegram", "111", "hello!");
     expect(reply).toBe("Hello Al Jood!");
   });
@@ -75,12 +101,12 @@ describe("the platform", () => {
 
     const inviteA = (await platform.handle("telegram", "999", "/tenant new A")).match(/\/join (\S+)/)![1];
     const inviteB = (await platform.handle("telegram", "999", "/tenant new B")).match(/\/join (\S+)/)![1];
-    await platform.handle("telegram", "111", `/join ${inviteA}`);
-    await platform.handle("telegram", "222", `/join ${inviteB}`);
+    await joinAndHatch(platform, "111", inviteA);
+    await joinAndHatch(platform, "222", inviteB);
 
     // Tenant A's agent remembers something private.
     const idA = platform.tenants.tenantFor("telegram", "111")!.id;
-    const orgA = (platform.warmOrganisms().find((o) => o.tenantId === idA))!.organism;
+    const orgA = await platform.organismFor(idA);
     orgA.memory.remember("bank", "A's account is at Riyad Bank.");
 
     await platform.handle("telegram", "111", "what do you know?");
@@ -96,7 +122,7 @@ describe("the platform", () => {
   it("enforces thinking quotas per tenant, in plain words", async () => {
     const { platform } = makePlatform();
     const invite = (await platform.handle("telegram", "999", "/tenant new Small trial")).match(/\/join (\S+)/)![1];
-    await platform.handle("telegram", "111", `/join ${invite}`);
+    await joinAndHatch(platform, "111", invite);
 
     const id = platform.tenants.tenantFor("telegram", "111")!.id;
     for (let i = 0; i < PLANS.trial.thoughtsPerDay; i++) platform.tenants.record(id, "thought");
@@ -109,10 +135,10 @@ describe("the platform", () => {
   it("caps how many habits a plan may hold, at the door", async () => {
     const { platform } = makePlatform();
     const invite = (await platform.handle("telegram", "999", "/tenant new Small trial")).match(/\/join (\S+)/)![1];
-    await platform.handle("telegram", "111", `/join ${invite}`);
+    await joinAndHatch(platform, "111", invite);
 
     const id = platform.tenants.tenantFor("telegram", "111")!.id;
-    const org = platform.warmOrganisms().find((o) => o.tenantId === id)!.organism;
+    const org = await platform.organismFor(id);
     for (let i = 0; i < PLANS.trial.maxHabits; i++) {
       org.flows.saveDraft({
         name: `h${i}`, description: "d", signature: `s${i}`, triggers: [], params: [],
@@ -151,10 +177,10 @@ describe("the platform", () => {
     });
     const { platform } = makePlatform();
     const invite = (await platform.handle("telegram", "999", "/tenant new Hooked")).match(/\/join (\S+)/)![1];
-    await platform.handle("telegram", "111", `/join ${invite}`);
+    await joinAndHatch(platform, "111", invite);
 
     const id = platform.tenants.tenantFor("telegram", "111")!.id;
-    const org = platform.warmOrganisms().find((o) => o.tenantId === id)!.organism;
+    const org = await platform.organismFor(id);
     org.flows.saveDraft({
       name: "ping-it", description: "d", signature: "ping", triggers: [], params: [],
       runs: 2, createdAt: "now", status: "draft",
