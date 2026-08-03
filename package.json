@@ -14,7 +14,8 @@
     "heartbeat": "tsx packages/server/src/heartbeat.ts",
     "journal": "tsx packages/server/src/cli.ts",
     "canvas": "tsx packages/server/src/canvas.ts",
-    "serve": "tsx packages/server/src/serve.ts"
+    "serve": "tsx packages/server/src/serve.ts",
+    "backup": "tsx packages/server/src/backup-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

@@ -5,9 +5,10 @@ import { shellExecNode, sshExecNode } from "./shell.js";
 import { webSearchNode, webReadNode } from "./web.js";
 import { pdfCreateNode, pptxCreateNode } from "./documents.js";
 import { n8nImportNode, unsupportedNode } from "./n8n-import.js";
-import { telegramSendNode } from "./telegram.js";
+import { telegramSendNode, telegramPollNode } from "./telegram.js";
 import { visionLookNode, voiceSayNode, transcribeNode } from "./senses.js";
-import { gotenbergRenderNode, canvasSnapNode } from "./gotenberg.js";
+import { docReadNode } from "./doc-read.js";
+import { gotenbergRenderNode, canvasSnapNode, browserSnapNode } from "./gotenberg.js";
 
 export * from "./echo.js";
 export * from "./http-request.js";
@@ -19,6 +20,7 @@ export * from "./mcp.js";
 export * from "./telegram.js";
 export * from "./gotenberg.js";
 export * from "./senses.js";
+export * from "./doc-read.js";
 
 export function registerBuiltinNodes(): void {
   for (const node of [
@@ -38,6 +40,9 @@ export function registerBuiltinNodes(): void {
     visionLookNode(),
     voiceSayNode(),
     transcribeNode(),
+    docReadNode(),
+    browserSnapNode(),
+    telegramPollNode(),
   ]) {
     registerNode(node);
   }

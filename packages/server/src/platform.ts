@@ -3,7 +3,11 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { Journal } from "@squidclaw/kernel";
 import type { Mind } from "@squidclaw/brains";
-import { ConversationStore, SemanticMemory, memoryNodes, taskList, taskNodes } from "@squidclaw/memory";
+import {
+  ConversationStore, KnowledgeBase, Profiles, SemanticMemory,
+  knowledgeNodes, memoryNodes, profileNodes, taskList, taskNodes,
+} from "@squidclaw/memory";
+import { extractTextFromFile } from "@squidclaw/nodes";
 import {
   Agent, FlowStore, VibeState, loadVibes,
   answerHatching, beginHatching, birthAnnouncement, type HatchState,
@@ -71,9 +75,21 @@ export class Platform {
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
       // Tools holding this tenant's data are private to this agent, never global:
-      // its memories, its human's todo list, its own reminders.
-      extraNodes: [...memoryNodes(memory), ...taskNodes(taskList(dir)), ...reminderNodes(reflexes)],
+      // memories, todo list, reminders, knowledge base, who's-who profiles.
+      extraNodes: [
+        ...memoryNodes(memory),
+        ...taskNodes(taskList(dir)),
+        ...reminderNodes(reflexes),
+        ...knowledgeNodes(new KnowledgeBase(join(dir, "knowledge")), extractTextFromFile()),
+        ...profileNodes(new Profiles(join(dir, "profiles"))),
+      ],
     });
+
+    // Old unused memories fade; the load-bearing ones never do.
+    const sweep = () => memory.decay({ maxAgeDays: 45, protect: ["my-human", "my-purpose"] });
+    sweep();
+    const decayTimer = setInterval(sweep, 24 * 3_600_000);
+    decayTimer.unref?.();
 
     const organism: Booted = {
       agent,

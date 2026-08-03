@@ -131,6 +131,48 @@ export class Agent {
   }
 
   /**
+   * The rolling summary: when a chat outgrows its verbatim window, the older
+   * turns fold into a compressed "earlier in this conversation" — so a chat
+   * from last month still knows what it was about. Fire-and-forget.
+   */
+  private updateSummary(chatId: string): void {
+    const { conversation, brains, tenantId } = this.opts;
+    if (!conversation) return;
+    void (async () => {
+      try {
+        const total = conversation.count(tenantId, chatId);
+        const covered = conversation.summary(tenantId, chatId)?.turnsCovered ?? 0;
+        const window = 20; // the verbatim window recent() carries
+        // Only fold when a full window of unsummarized history has scrolled past.
+        if (total - covered <= window * 2) return;
+
+        const toCover = total - window;
+        const older = conversation.turnsBetween(tenantId, chatId, covered, toCover);
+        if (!older.length) return;
+        const previous = conversation.summary(tenantId, chatId)?.summary ?? "";
+
+        const res = await brains.complete({
+          tier: "cheap",
+          system:
+            "Fold the new turns into the running summary of this conversation. Keep names, decisions, open threads. A short paragraph — reply with the summary only.",
+          messages: [
+            {
+              role: "user",
+              content: `RUNNING SUMMARY:\n${previous || "(none yet)"}\n\nNEW TURNS:\n${older
+                .map((t) => `${t.role}: ${t.content}`)
+                .join("\n")}`,
+            },
+          ],
+          maxTokens: 400,
+        });
+        if (res.text.trim()) conversation.setSummary(tenantId, chatId, res.text.trim(), toCover);
+      } catch {
+        // A missed summary costs nothing; the verbatim window still works.
+      }
+    })();
+  }
+
+  /**
    * The auto-link reader: a pasted URL gets fetched into context before the
    * brain ever thinks, and the fetch is journaled like any other step.
    */
@@ -189,6 +231,10 @@ export class Agent {
     const parts = [this.opts.innerMe];
 
     if (this.opts.vibes) parts.push(this.opts.vibes.prompt(chatId));
+
+    // What this chat was about before the recent window — compressed, not lost.
+    const summary = this.opts.conversation?.summary(this.opts.tenantId, chatId);
+    if (summary?.summary) parts.push(`## Earlier in this conversation\n${summary.summary}`);
 
     const known = this.opts.memory?.all() ?? [];
     if (known.length) {
@@ -331,6 +377,7 @@ export class Agent {
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
       this.extractFacts(text, reply); // fire-and-forget: the passive ear
+      this.updateSummary(chatId); // fire-and-forget: the rolling memory of this chat
 
       // Only work that actually did something is worth remembering how to do.
       if (graph.nodes.length) {

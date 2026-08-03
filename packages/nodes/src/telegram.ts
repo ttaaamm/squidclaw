@@ -66,3 +66,43 @@ export function telegramSendNode(opts: TelegramSendOptions = {}): NodeDef {
     },
   };
 }
+
+/** Ask the room: a real Telegram poll. */
+export function telegramPollNode(opts: TelegramSendOptions = {}): NodeDef {
+  return {
+    name: "telegram.poll",
+    description:
+      "Send a Telegram poll. Params: chatId (required), question (required), options (array of 2-10 answer strings, required), anonymous (default true).",
+    inputSchema: {
+      type: "object",
+      required: ["chatId", "question", "options"],
+      properties: {
+        chatId: { type: "string" },
+        question: { type: "string" },
+        options: { type: "array", items: { type: "string" } },
+        anonymous: { type: "boolean" },
+      },
+    },
+    run: async (params) => {
+      const token = opts.token ?? process.env.TELEGRAM_BOT_TOKEN;
+      if (!token) throw new Error("telegram.poll: TELEGRAM_BOT_TOKEN missing");
+      const options = params.options as string[];
+      if (!Array.isArray(options) || options.length < 2) {
+        throw new Error("telegram.poll: a poll needs at least two options");
+      }
+      const res = await fetch(`${opts.apiRoot ?? "https://api.telegram.org"}/bot${token}/sendPoll`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: params.chatId,
+          question: params.question,
+          options: options.slice(0, 10),
+          is_anonymous: params.anonymous !== false,
+        }),
+      });
+      const body = (await res.json()) as { ok: boolean; description?: string };
+      if (!body.ok) throw new Error(`telegram.poll: ${body.description ?? `HTTP ${res.status}`}`);
+      return [{ json: { sent: true, kind: "poll", question: params.question } }];
+    },
+  };
+}

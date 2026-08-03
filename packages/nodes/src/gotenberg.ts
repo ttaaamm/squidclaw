@@ -85,3 +85,34 @@ export function canvasSnapNode(opts: GotenbergOptions = {}): NodeDef {
     },
   };
 }
+
+/** See a live webpage the way a human does — as pixels, not stripped text. */
+export function browserSnapNode(opts: GotenbergOptions = {}): NodeDef {
+  return {
+    name: "browser.snap",
+    description:
+      "Screenshot a live webpage as a PNG (when layout matters, or web.read's text isn't enough). Params: url (required), filename (default page.png), width (px, default 1280). Chain telegram.send to show the human, or vision.look to read the pixels.",
+    inputSchema: {
+      type: "object",
+      required: ["url"],
+      properties: { url: { type: "string" }, filename: { type: "string" }, width: { type: "number" } },
+    },
+    run: async (params) => {
+      const base = opts.baseUrl ?? process.env.GOTENBERG_URL ?? "http://127.0.0.1:3000";
+      const form = new FormData();
+      form.append("url", String(params.url));
+      form.append("format", "png");
+      form.append("width", String(params.width ?? 1280));
+
+      const res = await fetch(`${base}/forms/chromium/screenshot/url`, { method: "POST", body: form });
+      if (!res.ok) {
+        const detail = (await res.text()).slice(0, 300);
+        throw new Error(`browser.snap: HTTP ${res.status} — ${detail}`);
+      }
+
+      const png = Buffer.from(await res.arrayBuffer());
+      const filename = String(params.filename ?? "page.png");
+      return [{ json: { filename, url: params.url, bytes: png.length, kind: "image" }, binary: { data: png } }];
+    },
+  };
+}
