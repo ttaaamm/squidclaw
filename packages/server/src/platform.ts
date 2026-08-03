@@ -13,7 +13,8 @@ import {
   answerHatching, beginHatching, birthAnnouncement, type HatchState,
 } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, reminderNodes } from "@squidclaw/reflexes";
-import { AgentPool, TenantStore, PLANS, type Tenant } from "@squidclaw/tenants";
+import { AgentPool, LoginStore, TenantStore, PLANS, safeEqual, type Tenant } from "@squidclaw/tenants";
+import type { Sources } from "@squidclaw/canvas";
 import { habitRunner, handleCommand, type Booted } from "./boot.js";
 
 export interface PlatformOptions {
@@ -27,6 +28,8 @@ export interface PlatformOptions {
   notify?: (tenantId: string, message: string) => void;
   /** The deep mind (MCP-bridged Claude Code harness) for every tenant's agent. */
   deep?: import("@squidclaw/agent").DeepOptions;
+  /** Where the canvas lives, for sign-in links: e.g. https://flow.preplix.ai */
+  publicUrl?: string;
 }
 
 /**
@@ -39,6 +42,7 @@ export interface PlatformOptions {
  */
 export class Platform {
   readonly tenants: TenantStore;
+  readonly logins: LoginStore;
   private pool: AgentPool<Booted>;
   private schedulers = new Map<string, Scheduler>();
   private organisms = new Map<string, Booted>();
@@ -47,10 +51,48 @@ export class Platform {
   constructor(private opts: PlatformOptions) {
     mkdirSync(join(opts.root, "platform"), { recursive: true });
     this.tenants = new TenantStore(join(opts.root, "platform", "tenants.db"));
+    this.logins = new LoginStore(join(opts.root, "platform", "auth.db"));
     this.admins = new Set(opts.adminChats ?? []);
     this.pool = new AgentPool(this.tenants, join(opts.root, "tenants"), (ws, tenant) =>
       this.buildOrganism(ws.dir, tenant),
     );
+  }
+
+  /** A one-time sign-in link into this tenant's canvas. */
+  canvasLink(tenantId: string): string {
+    const base = this.opts.publicUrl ?? "http://127.0.0.1:4200";
+    return `${base}/login?code=${this.logins.mintCode(tenantId)}`;
+  }
+
+  /** Read-only view of one tenant's mind, for the canvas. */
+  sourcesFor(tenantId: string): Sources | undefined {
+    const tenant = this.tenants.find(tenantId);
+    if (!tenant || !tenant.enabled) return undefined;
+    const dir = this.tenantDir(tenantId);
+    if (!existsSync(dir)) return undefined;
+    // The warm organism when there is one; a cold read of the same files otherwise.
+    const warm = this.organisms.get(tenantId);
+    const journal = warm?.journal ?? new Journal(join(dir, "journal", "executions.db"));
+    const flows = warm?.flows ?? new FlowStore(join(dir, "flows"));
+    const reflexes = warm?.reflexes ?? new ReflexStore(join(dir, "reflexes"));
+    const memory = warm?.memory ?? new SemanticMemory(join(dir, "memory"));
+    return {
+      journal,
+      flows,
+      reflexes,
+      memories: () => memory.all(),
+      mind: { via: this.opts.via, tools: 0 },
+      tenantId,
+    };
+  }
+
+  /**
+   * The Preplix handshake: an outside account (Supabase user id) maps to one
+   * tenant. First sight creates it; every later call finds the same one.
+   */
+  linkPartnerAccount(externalId: string, name: string): { tenant: Tenant; invite: string; canvasLink: string } {
+    const tenant = this.tenants.findOrCreateByExternal(externalId, name);
+    return { tenant, invite: `/join ${tenant.token}`, canvasLink: this.canvasLink(tenant.id) };
   }
 
   private buildOrganism(dir: string, tenant: Tenant): Booted {
@@ -299,6 +341,11 @@ export class Platform {
 
     const organism = await this.pool.for(tenant.id);
 
+    // The window into its own mind — a one-time link, minted for this tenant only.
+    if (trimmed === "/canvas") {
+      return `🧠 Your agent's mind is here — this link signs you in (works once, expires in 10 minutes):\n${this.canvasLink(tenant.id)}`;
+    }
+
     // A plan holds only so many habits — say so at the door, not after the work.
     if (/^\/promote\b/.test(trimmed)) {
       const quotas = this.tenants.quotas(tenant.id);
@@ -321,13 +368,51 @@ export class Platform {
   /**
    * The public webhook door, tenant-aware: POST /hooks/<path> finds whichever
    * warm tenant armed that path. First match wins — collisions are logged.
+   *
+   * Also carries the partner API (Bearer-guarded, for Preplix on the same
+   * box): POST /partner/link {externalId, name} and POST /partner/sso
+   * {externalId} — accounts over there become tenants over here.
    */
-  hooksServer(token?: string): Server {
+  hooksServer(token?: string, partnerKey?: string): Server {
     return createServer((req, res) => {
       const send = (code: number, body: Record<string, unknown>) => {
         res.writeHead(code, { "content-type": "application/json" });
         res.end(JSON.stringify(body));
       };
+
+      if ((req.url ?? "").startsWith("/partner/") && req.method === "POST") {
+        const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
+        if (!partnerKey || !bearer || !safeEqual(bearer, partnerKey)) return send(401, { error: "bad partner key" });
+        let raw = "";
+        req.on("data", (c: Buffer) => (raw += c));
+        req.on("end", () => {
+          try {
+            const body = JSON.parse(raw || "{}") as { externalId?: string; name?: string };
+            if (!body.externalId) return send(400, { error: "externalId required" });
+
+            if (req.url === "/partner/link") {
+              const linked = this.linkPartnerAccount(body.externalId, body.name ?? "Preplix user");
+              return send(200, {
+                tenantId: linked.tenant.id,
+                name: linked.tenant.name,
+                plan: linked.tenant.plan,
+                invite: linked.invite,
+                canvasLink: linked.canvasLink,
+              });
+            }
+            if (req.url === "/partner/sso") {
+              const tenant = this.tenants.byExternal(body.externalId);
+              if (!tenant || !tenant.enabled) return send(404, { error: "no linked agent for that account" });
+              return send(200, { canvasLink: this.canvasLink(tenant.id) });
+            }
+            send(404, { error: "not found" });
+          } catch {
+            send(400, { error: "body must be JSON" });
+          }
+        });
+        return;
+      }
+
       const match = (req.url ?? "").match(/^\/hooks\/([\w.-]+)$/);
       if ((req.url ?? "") === "/health") return send(200, { ok: true });
       if (!match) return send(404, { error: "not found" });

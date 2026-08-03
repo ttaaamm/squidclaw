@@ -52,6 +52,35 @@ export class TenantStore {
       CREATE TABLE IF NOT EXISTS usage (
         tenant_id TEXT NOT NULL, day TEXT NOT NULL, kind TEXT NOT NULL,
         count INTEGER NOT NULL, PRIMARY KEY (tenant_id, day, kind));`);
+    // Migration: link tenants to an outside account system (e.g. Preplix/Supabase).
+    try {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN external_id TEXT`);
+    } catch {
+      // column already exists
+    }
+  }
+
+  /** The tenant linked to an outside account (Preplix user id, etc.). */
+  byExternal(externalId: string): Tenant | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM tenants WHERE external_id = ?`)
+      .get(externalId) as Record<string, unknown> | undefined;
+    return this.row(row);
+  }
+
+  linkExternal(tenantId: string, externalId: string): boolean {
+    return (
+      Number(this.db.prepare(`UPDATE tenants SET external_id = ? WHERE id = ?`).run(externalId, tenantId).changes) > 0
+    );
+  }
+
+  /** The partner handshake: an outside account maps to exactly one tenant, created on first sight. */
+  findOrCreateByExternal(externalId: string, name: string, plan: keyof typeof PLANS = "standard"): Tenant {
+    const existing = this.byExternal(externalId);
+    if (existing) return existing;
+    const tenant = this.create(name, plan);
+    this.linkExternal(tenant.id, externalId);
+    return this.find(tenant.id)!;
   }
 
   private row(r: Record<string, unknown> | undefined): Tenant | undefined {
@@ -72,7 +101,7 @@ export class TenantStore {
       createdAt: new Date().toISOString(),
     };
     this.db
-      .prepare(`INSERT INTO tenants VALUES (?,?,?,?,1,?)`)
+      .prepare(`INSERT INTO tenants (id, name, plan, token, enabled, created_at) VALUES (?,?,?,?,1,?)`)
       .run(tenant.id, tenant.name, tenant.plan, tenant.token, tenant.createdAt);
     return tenant;
   }
