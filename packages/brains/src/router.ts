@@ -27,10 +27,15 @@ export interface CompleteRequest {
   maxTokens?: number;
 }
 
+/** Anything that can think. The agent never cares which door it came through. */
+export interface Mind {
+  complete(req: CompleteRequest): Promise<CompleteResult>;
+}
+
 type MessagesCreate = (req: Record<string, unknown>) => Promise<unknown>;
 
 /** One interface, many minds. Tries each model in the tier until one answers. */
-export class Brains {
+export class Brains implements Mind {
   private call: MessagesCreate;
 
   constructor(

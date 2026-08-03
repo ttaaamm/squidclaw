@@ -1,10 +1,16 @@
 import "dotenv/config";
+import { listNodes } from "@squidclaw/kernel";
 import { CliSurface } from "@squidclaw/surfaces";
-import { bootAgent, requireEnv } from "./boot.js";
+import { bootAgent, handleCommand } from "./boot.js";
 
-requireEnv("ANTHROPIC_API_KEY");
+const { agent, vibes, via, mcp } = await bootAgent();
 
-const { agent } = bootAgent();
+console.log(`🫀 SquidClaw heartbeat — terminal surface`);
+console.log(`   thinking via: ${via}${via === "cli" ? " (your Claude subscription — no API key needed)" : ""}`);
+console.log(`   tools: ${listNodes().length}${mcp.registered.length ? ` (${mcp.registered.length} via MCP)` : ""}`);
+for (const [server, err] of Object.entries(mcp.failed)) console.log(`   ⚠️  MCP "${server}" failed: ${err}`);
+console.log(`   vibe: ${vibes.current("cli")} — change with /vibe <name>\n`);
 
-console.log("🫀 SquidClaw heartbeat — terminal surface\n");
-await new CliSurface((chatId, text) => agent.handleMessage(text, chatId)).start();
+await new CliSurface(async (chatId, text) => {
+  return handleCommand(text, vibes, chatId) ?? (await agent.handleMessage(text, chatId));
+}).start();

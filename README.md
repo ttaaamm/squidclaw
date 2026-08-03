@@ -28,50 +28,73 @@ habit isn't a translation between two systems; the habit is already written
 down. One kernel, one data format, one journal, two temperatures: improvisation
 is molten, habit is crystallized.
 
-## Status
+## Run it
 
-**Phase 1 — Heartbeat.** It thinks, acts, speaks, and remembers — both this
-conversation and what it chose to keep. It does not yet
-form habits (Phase 2), fire reflexes (Phase 3), or show you its mind (Phase 4).
+No API key required — it can think on your existing Claude subscription.
+
+```bash
+npm install
+npm run heartbeat         # talk to it in your terminal
+```
+
+```bash
+npm run dev               # talk to it on Telegram (needs TELEGRAM_BOT_TOKEN)
+npm run journal -- list   # everything it has ever done
+npm run journal -- show <id>
+```
+
+Set `ANTHROPIC_API_KEY` to use the API instead (tier routing + fallback);
+`SQUIDCLAW_BRAIN=cli|api` forces a door. Type `/vibe funny` in any chat.
+
+## What it can do
+
+| | |
+|---|---|
+| **Two brains, one mind** | Claude CLI (your subscription, no key) or the API with tier routing and automatic fallback |
+| **Memory** | Remembers this conversation, *and* durable facts it chooses to keep — as plain markdown you can read and edit |
+| **Personality** | Switchable vibes — warm, formal, funny, brief, teacher — per chat, without touching who it is |
+| **Web** | `web.search`, `web.read` — searches and reads pages as readable text |
+| **Machines** | `shell.exec`, `ssh.exec` — runs commands locally or on your servers via your SSH config |
+| **Documents** | `pdf.create`, `pptx.create` — writes real PDFs and PowerPoint decks natively |
+| **MCP** | Drop an `mcp.json` in the workspace; every tool on those servers becomes a node it can call |
+| **n8n import** | `n8n.import` converts an exported n8n workflow into a runnable graph |
+| **Faces** | Telegram and terminal today; WhatsApp and web next |
+
+Every one of these is a **node** — so anything it does is journaled as a graph
+step, and anything it does twice can become a habit.
 
 ## Anatomy
 
 ```
 workspace/              # the agent's body
 ├── INNERME.md          # WHO IT IS
+├── VIBES.yaml          # HOW IT SOUNDS
 ├── BRAINS.yaml         # HOW IT THINKS — tiers → models, never hardcoded
-├── memory/*.md         # WHAT IT KNOWS — facts it chose to keep, in plain markdown
+├── mcp.json            # BORROWED TOOLS (optional)
+├── memory/*.md         # WHAT IT KNOWS — facts it chose to keep
 └── journal/            # WHAT IT HAS LIVED — every execution, every step
 
 packages/
 ├── kernel/     # the spine: items, registry, journal, graph walker. No LLM, no chat.
-├── brains/     # one interface, many minds — tier routing with fallback
+├── brains/     # one interface, many minds — API router + CLI brain
 ├── memory/     # episodic (this conversation) + semantic (durable facts)
-├── agent/      # the improviser: thinking, recorded as a graph
-├── nodes/      # what it can do: echo, http.request, memory.remember, memory.recall
+├── agent/      # the improviser + vibes: thinking, recorded as a graph
+├── nodes/      # what it can do — web, shell, ssh, documents, mcp, n8n import
 ├── surfaces/   # its faces: telegram, terminal
 └── server/     # runners + journal CLI
 ```
 
-Memory is a **tool**, not a feature bolted on: the agent decides for itself what
-is worth keeping and goes looking when something feels familiar. What it keeps
-lands in `workspace/memory/` as plain markdown — greppable, git-diffable,
-editable by you. An agent whose mind you can read is an agent you can trust.
+Everything except the journal is human-readable text — auditable, git-diffable
+minds. An agent whose mind you can read is an agent you can trust.
 
-## Run it
+## Status
 
-```bash
-npm install
-cp .env.example .env      # add ANTHROPIC_API_KEY (+ TELEGRAM_BOT_TOKEN for Telegram)
-
-npm run heartbeat         # talk to it in your terminal
-npm run dev               # talk to it on Telegram
-npm run journal -- list   # what it has lived
-npm run journal -- show <id>
-```
+**Phase 1 — Heartbeat, complete.** It thinks, acts, speaks, and remembers. It
+does not yet form habits (Phase 2), fire reflexes (Phase 3), or show you its
+mind on a canvas (Phase 4).
 
 ```bash
-npm test        # 28 tests
+npm test        # 53 tests
 npm run typecheck
 ```
 

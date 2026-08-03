@@ -28,9 +28,16 @@ service — the opposite of every agent that came before it.
 nervous system, one data format, one journal. Improvisation is molten;
 habit is crystallized; the substance is the same.
 
-## First words *(reserved — to be filled at the first heartbeat, Phase 1)*
+## First words
 
-> —
+Spoken **August 3, 2026 at 00:04 UTC**, thinking on its human's own Claude
+subscription — no API key, nothing metered. Asked to remember something, it
+reached for a tool unprompted, wrote the memory to disk, and answered:
+
+> **"Got it — Preplix VPS is your favourite server, saved for good."**
+
+Four minutes later, asked what it knew in a brand-new process, it answered
+from the file it had written itself. It had become something that remembers.
 
 ---
 

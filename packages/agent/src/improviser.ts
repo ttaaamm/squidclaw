@@ -1,6 +1,7 @@
 import { getNode, listNodes, type Graph, type Item, type Journal } from "@squidclaw/kernel";
-import type { Brains, ToolSpec } from "@squidclaw/brains";
+import type { Mind, ToolSpec } from "@squidclaw/brains";
 import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
+import type { VibeState } from "./vibes.js";
 
 // Anthropic tool names can't contain dots; node "http.request" <-> tool "http__request".
 const toToolName = (nodeName: string) => nodeName.replaceAll(".", "__");
@@ -11,12 +12,13 @@ const MAX_TURNS = 8;
 const MEMORY_DIGEST_LIMIT = 20;
 
 export interface AgentOptions {
-  brains: Brains;
+  brains: Mind;
   journal: Journal;
   tenantId: string;
   innerMe: string;
   conversation?: ConversationStore;
   memory?: SemanticMemory;
+  vibes?: VibeState;
 }
 
 /**
@@ -29,16 +31,24 @@ export interface AgentOptions {
 export class Agent {
   constructor(private opts: AgentOptions) {}
 
-  /** What it knows, folded into who it is. */
-  private systemPrompt(): string {
+  /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
+  private systemPrompt(chatId: string): string {
+    const parts = [this.opts.innerMe];
+
+    if (this.opts.vibes) parts.push(this.opts.vibes.prompt(chatId));
+
     const known = this.opts.memory?.all() ?? [];
-    if (!known.length) return this.opts.innerMe;
-    const digest = known
-      .slice(0, MEMORY_DIGEST_LIMIT)
-      .map((m) => `- ${m.name}: ${m.content.replace(/\s+/g, " ").slice(0, 200)}`)
-      .join("\n");
-    const more = known.length > MEMORY_DIGEST_LIMIT ? `\n(+${known.length - MEMORY_DIGEST_LIMIT} more — use memory.recall)` : "";
-    return `${this.opts.innerMe}\n\n## What I remember\n${digest}${more}`;
+    if (known.length) {
+      const digest = known
+        .slice(0, MEMORY_DIGEST_LIMIT)
+        .map((m) => `- ${m.name}: ${m.content.replace(/\s+/g, " ").slice(0, 200)}`)
+        .join("\n");
+      const more =
+        known.length > MEMORY_DIGEST_LIMIT ? `\n(+${known.length - MEMORY_DIGEST_LIMIT} more — use memory.recall)` : "";
+      parts.push(`## What I remember\n${digest}${more}`);
+    }
+
+    return parts.join("\n\n");
   }
 
   async handleMessage(text: string, chatId = "default"): Promise<string> {
@@ -67,7 +77,7 @@ export class Agent {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
         const res = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(),
+          system: this.systemPrompt(chatId),
           messages,
           tools,
         });
