@@ -135,7 +135,7 @@ describe("the deep run", () => {
           });
           // The system prompt made it in; so did the guardrail on tools.
           expect(args[args.indexOf("--append-system-prompt") + 1]).toContain("I am Sanad.");
-          expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__squidclaw__*");
+          expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__squidclaw");
           return JSON.stringify({ reply: "Found it via the deep mind." });
         },
       },

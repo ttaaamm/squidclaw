@@ -156,7 +156,8 @@ export async function runClaudeDeep(opts: {
       "--model", opts.deep.model ?? "sonnet",
       "--mcp-config", opts.mcpConfigPath,
       // Strictly our bridge — a tenant's words must never reach the host filesystem.
-      "--allowedTools", "mcp__squidclaw__*",
+      // Server-level form: stable across CLI versions (the __* wildcard is not).
+      "--allowedTools", "mcp__squidclaw",
       "--append-system-prompt", opts.system,
       "--json-schema", REPLY_SCHEMA,
     ],
