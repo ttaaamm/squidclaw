@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { listNodes } from "@squidclaw/kernel";
 import { registerBuiltinNodes } from "@squidclaw/nodes";
 import { TelegramSurface, WhatsAppSurface } from "@squidclaw/surfaces";
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
 import { chooseMind, requireEnv } from "./boot.js";
 import { Platform } from "./platform.js";
 
@@ -30,6 +32,15 @@ const platform = new Platform({
   mind,
   via,
   adminChats: admins,
+  // The deep mind: whole tasks to the Claude Code harness, tools MCP-bridged.
+  // Default on when thinking via CLI; SQUIDCLAW_DEEP=0 opts out.
+  deep:
+    via === "cli" && process.env.SQUIDCLAW_DEEP !== "0"
+      ? {
+          shimPath: join(dirname(fileURLToPath(import.meta.url)), "mcp-shim.mjs"),
+          model: process.env.SQUIDCLAW_DEEP_MODEL ?? "sonnet",
+        }
+      : undefined,
   notify: (tenantId, message) => {
     console.log(`[${tenantId}] ${message}`);
     const chat = platform.tenants.bindings(tenantId).find((b) => b.surface === "telegram");

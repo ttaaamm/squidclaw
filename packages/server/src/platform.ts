@@ -25,6 +25,8 @@ export interface PlatformOptions {
   adminChats?: string[];
   /** Where reflex firings and healing reports for a tenant should go. */
   notify?: (tenantId: string, message: string) => void;
+  /** The deep mind (MCP-bridged Claude Code harness) for every tenant's agent. */
+  deep?: import("@squidclaw/agent").DeepOptions;
 }
 
 /**
@@ -74,6 +76,7 @@ export class Platform {
       flows,
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
+      deep: this.opts.deep,
       // Tools holding this tenant's data are private to this agent, never global:
       // memories, todo list, reminders, knowledge base, who's-who profiles.
       extraNodes: [

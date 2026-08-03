@@ -4,6 +4,7 @@ import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
 import { flowNode, type FlowStore } from "./flows.js";
 import { crystallize, findRepeatedWork } from "./crystallizer.js";
+import { runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
 
 // Anthropic tool names can't contain dots; node "http.request" <-> tool "http__request".
 const toToolName = (nodeName: string) => nodeName.replaceAll(".", "__");
@@ -35,6 +36,12 @@ export interface AgentOptions {
   extractFacts?: boolean;
   /** Read pasted links into context automatically. Default on. */
   autoRead?: boolean;
+  /**
+   * The deep mind: hand whole tasks to the Claude Code harness with our
+   * tools as an MCP server — real planning instead of one decision at a
+   * time. Falls back to the classic loop if a deep run fails.
+   */
+  deep?: DeepOptions;
 }
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
@@ -275,6 +282,100 @@ export class Agent {
   async handleMessage(
     text: string,
     chatId = "default",
+    onProgress?: (note: string) => void,
+    meta?: { surface?: string },
+  ): Promise<string> {
+    if (this.opts.deep) {
+      try {
+        return await this.deepRun(text, chatId, onProgress, meta);
+      } catch {
+        onProgress?.("deep mind unavailable — thinking step by step…");
+        // fall through to the classic loop
+      }
+    }
+    return this.classicRun(text, chatId, onProgress, meta);
+  }
+
+  /**
+   * The deep run: one call to the full harness, tools bridged in, every tool
+   * call journaled as a graph step — so habits crystallize out of deep runs
+   * exactly as they do from the classic loop.
+   */
+  private async deepRun(
+    text: string,
+    chatId: string,
+    onProgress?: (note: string) => void,
+    meta?: { surface?: string },
+  ): Promise<string> {
+    const { journal, tenantId, conversation } = this.opts;
+    const deep = this.opts.deep!;
+
+    const graph: Graph = { nodes: [], edges: [] };
+    const execId = journal.begin({ tenantId, kind: "improvised", graph });
+    let seq = 0;
+    let prev: string | null = null;
+
+    const bridge = await startToolBridge({
+      tools: this.available(),
+      tenantId,
+      onProgress,
+      onStep: (step) => {
+        const nodeId = `n${++seq}`;
+        graph.nodes.push({ id: nodeId, node: step.node, params: step.params });
+        if (prev) graph.edges.push({ from: prev, to: nodeId });
+        prev = nodeId;
+        journal.recordStep(execId, {
+          nodeId, node: step.node, params: step.params, input: [], output: step.output,
+          status: step.error ? "error" : "ok", error: step.error,
+          startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+        });
+      },
+    });
+
+    try {
+      const history = (conversation?.recent(tenantId, chatId) ?? [])
+        .map((t) => `${t.role}: ${t.content}`)
+        .join("\n");
+      const prompt = [
+        history ? `Conversation so far:\n${history}\n` : "",
+        `The human says: ${text}`,
+        "Complete the task — use your tools wherever they help — then give your final reply.",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      onProgress?.("thinking it through…");
+      const reply = await runClaudeDeep({
+        deep,
+        prompt,
+        system: this.systemPrompt(chatId, meta?.surface),
+        mcpConfigPath: writeMcpConfig(deep.shimPath, bridge),
+      });
+
+      journal.setGraph(execId, graph);
+      journal.finish(execId, "ok");
+      conversation?.append(tenantId, chatId, "user", text);
+      conversation?.append(tenantId, chatId, "assistant", reply);
+      this.extractFacts(text, reply);
+      this.updateSummary(chatId);
+
+      if (graph.nodes.length) {
+        const formed = this.formHabit(chatId, text);
+        if (formed) return reply + formed;
+      }
+      return reply;
+    } catch (err) {
+      journal.setGraph(execId, graph);
+      journal.finish(execId, "error");
+      throw err;
+    } finally {
+      await bridge.close();
+    }
+  }
+
+  private async classicRun(
+    text: string,
+    chatId: string,
     onProgress?: (note: string) => void,
     meta?: { surface?: string },
   ): Promise<string> {
