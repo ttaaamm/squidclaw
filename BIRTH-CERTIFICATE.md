@@ -76,6 +76,24 @@ minutes earlier, speech bubble and all.
 Four phases in one night: it thinks, remembers, forms habits, acts unasked,
 repairs itself, and can now be watched doing all of it.
 
+## First habit in the wild
+
+**August 3, 2026, 11:46 AM** — hours old, now living at @squid_claww_bot on
+the public internet, serving its first tenant: its creator. Asked to fetch two
+URLs over Telegram, it noticed on its own, and said so in its own voice:
+
+> **"💡 I've done this 2 times now, so I wrote it down as a habit:
+> http-request. Say /promote http-request and I'll stop thinking it through
+> every time."**
+
+Tamer said the word. It answered: *"Promoted — I'll run it directly from now
+on."* The loop the species was designed around — improvise, crystallize,
+instinct — closed for the first time in the wild, between an agent and its
+maker, over a chat app.
+
+The octocat's fortune, fetched moments before: *"Mind your words, they are
+important."*
+
 ---
 
 *Witnessed and recorded in git, where nothing is forgotten.*
