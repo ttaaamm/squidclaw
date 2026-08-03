@@ -217,13 +217,18 @@ function svg(L, nodes) {
   const edges = L.edges.map(e => '<path class="edge" d="' + e.path + '"/>').join('');
   const boxes = L.nodes.map(n => {
     const info = byId[n.id] || {};
-    const label = n.node.length > 22 ? n.node.slice(0, 21) + '…' : n.node;
+    // Imported steps keep their original names — "Send to Telegram", not a
+    // wall of unsupported.node. The box's subtitle tells the honest status.
+    const imported = info.params && info.params.n8nName;
+    const name = imported ? String(info.params.n8nName) : n.node;
+    const label = name.length > 22 ? name.slice(0, 21) + '…' : name;
+    const sub = imported
+      ? 'needs native · ' + (info.status || 'not run')
+      : (info.status || 'not run') + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '');
     return '<g class="n" data-node="' + n.id + '" data-status="' + (info.status || '') + '">' +
       '<rect x="' + n.x + '" y="' + n.y + '" width="' + n.width + '" height="' + n.height + '" rx="9"/>' +
       '<text x="' + (n.x + 14) + '" y="' + (n.y + 26) + '">' + esc(label) + '</text>' +
-      '<text class="sub" x="' + (n.x + 14) + '" y="' + (n.y + 45) + '">' +
-        esc(info.status || 'not run') + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '') +
-      '</text></g>';
+      '<text class="sub" x="' + (n.x + 14) + '" y="' + (n.y + 45) + '">' + esc(sub) + '</text></g>';
   }).join('');
   return '<svg width="' + Math.max(L.width, 320) + '" height="' + L.height + '" ' +
     'viewBox="0 0 ' + L.width + ' ' + L.height + '">' + edges + boxes + '</svg>';
