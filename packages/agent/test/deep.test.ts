@@ -175,3 +175,14 @@ describe("the deep run", () => {
     expect(classicCalls).toBeGreaterThan(0);
   });
 });
+
+describe("reply hygiene", () => {
+  it("strips harness artifacts the model leaks into its prose", async () => {
+    const { cleanReply } = await import("@squidclaw/agent");
+    expect(cleanReply("Great headlines here.</reply>\n</invoke>")).toBe("Great headlines here.");
+    expect(cleanReply("<reply>clean answer</reply>")).toBe("clean answer");
+    expect(cleanReply("no tags at all")).toBe("no tags at all");
+    // Honest text that merely mentions angle brackets in code stays intact.
+    expect(cleanReply("use <b>bold</b> in html")).toBe("use <b>bold</b> in html");
+  });
+});

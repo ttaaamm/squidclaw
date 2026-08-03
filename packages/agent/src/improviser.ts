@@ -4,7 +4,7 @@ import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
 import { flowNode, type FlowStore } from "./flows.js";
 import { crystallize, findRepeatedWork } from "./crystallizer.js";
-import { runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
+import { cleanReply, runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
 
 // Anthropic tool names can't contain dots; node "http.request" <-> tool "http__request".
 const toToolName = (nodeName: string) => nodeName.replaceAll(".", "__");
@@ -435,7 +435,7 @@ export class Agent {
           tools,
         });
         if (res.toolCalls.length === 0) {
-          reply = res.text;
+          reply = cleanReply(res.text);
           break;
         }
         messages.push({ role: "assistant", content: res.assistantContent });
@@ -497,7 +497,7 @@ export class Agent {
             },
           ],
         });
-        reply = final.text;
+        reply = cleanReply(final.text);
       }
 
       journal.setGraph(execId, graph);

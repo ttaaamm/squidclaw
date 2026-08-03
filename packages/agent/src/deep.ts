@@ -174,5 +174,15 @@ export async function runClaudeDeep(opts: {
   if (start === -1 || end <= start) throw new Error("deep run returned nothing readable");
   const parsed = JSON.parse(raw.slice(start, end + 1)) as { reply?: string };
   if (!parsed.reply) throw new Error("deep run returned no reply");
-  return parsed.reply;
+  return cleanReply(parsed.reply);
+}
+
+/**
+ * Models occasionally leak harness artifacts into their prose —
+ * `</reply>`, `</invoke>`, XMLish wrappers. The human never sees plumbing.
+ */
+export function cleanReply(reply: string): string {
+  return reply
+    .replace(/<\/?(?:reply|invoke|response|answer|output|antml[\w:-]*)[^>]*>/gi, "")
+    .trim();
 }
