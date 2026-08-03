@@ -3,6 +3,7 @@ node_modules/
 workspace/journal/
 workspace/memory/
 workspace/flows/
+workspace/reflexes/
 *.db
 *.db-wal
 *.db-shm

@@ -1,7 +1,0 @@
-{
-  "name": "hourly-zen",
-  "flow": "fetch-zen",
-  "enabled": true,
-  "createdAt": "2026-08-03T00:56:27.361Z",
-  "cron": "0 * * * *"
-}
