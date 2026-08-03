@@ -25,6 +25,12 @@ export interface AgentOptions {
   flows?: FlowStore;
   /** How many times the same work must succeed before it becomes a habit. */
   crystallizeAfter?: number;
+  /**
+   * Tools private to this agent — its own memory nodes, for one. The global
+   * registry is for capabilities every tenant shares; anything holding a
+   * tenant's data must come through here instead.
+   */
+  extraNodes?: NodeDef[];
 }
 
 /**
@@ -67,13 +73,17 @@ export class Agent {
     return this.habits.get(name.startsWith("flow.") ? name : `flow.${name}`);
   }
 
-  /** Everything it can reach for: shared tools plus its own skills. */
+  /** Everything it can reach for: shared tools, its private tools, its own skills. */
   private available(): NodeDef[] {
-    return [...listNodes(), ...this.habits.values()];
+    return [...listNodes(), ...(this.opts.extraNodes ?? []), ...this.habits.values()];
   }
 
   private resolve(name: string): NodeDef | undefined {
-    return this.habits.get(name) ?? getNode(name);
+    return (
+      this.habits.get(name) ??
+      this.opts.extraNodes?.find((n) => n.name === name) ??
+      getNode(name)
+    );
   }
 
   /**

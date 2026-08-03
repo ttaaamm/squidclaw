@@ -188,14 +188,45 @@ hand-drawn SVG instead: no bundler, no framework, no build step, and it ships
 inside the same Node process the agent already runs in. React Flow earns its
 weight when a canvas becomes editable — that's a Phase 5 decision, not this one.
 
-## Status
+## Serving many humans
 
-**Phase 4 — Canvas, complete.** It thinks, acts, speaks, remembers, forms
-habits, fires them unasked, repairs itself, and shows you its mind. It does not
-yet serve multiple tenants (Phase 5) or ship as a self-host package (Phase 6).
+Two ways to run it:
 
 ```bash
-npm test        # 130 tests
+npm run dev      # yours alone — one agent, no accounts (also: npm run heartbeat)
+npm run serve    # the platform — invites, tenants, quotas, per-tenant everything
+```
+
+On the platform, onboarding is a conversation:
+
+```
+admin › /tenant new Al Jood standard
+      › Created Al Jood. Their invite: /join x7f…
+
+client › /join x7f…
+       › Welcome — this chat now belongs to Al Jood.
+         Just tell me what eats your time, and I'll start learning it.
+```
+
+Each tenant is a separate organism in its own directory — own memories, own
+habits, own reflexes, own journal, own budget. They share only the builtin
+tools. Habits and memory tools live on the agent, never in the global
+registry, so nothing can leak between tenants — tested explicitly.
+
+Plans meter **thinking**, not habits: when a trial tenant runs out of
+improvised runs for the day, everything it already learned keeps running
+free. The product's promise, priced.
+
+## Status
+
+**Phase 5 — Multi-tenancy, complete.** It thinks, acts, speaks, remembers,
+forms habits, fires them unasked, repairs itself, shows you its mind, and
+serves many humans at once — each walled off from the others. Its mind is live
+at a real URL behind a token. What remains is Phase 6: the self-host package,
+WhatsApp via the Meta Cloud API, and billing.
+
+```bash
+npm test        # 165 tests
 npm run typecheck
 ```
 
