@@ -1,5 +1,5 @@
 import { getNode } from "./registry.js";
-import type { ExecutionKind, ExecutionRecord, Graph, Item } from "./types.js";
+import { branchesOf, type ExecutionKind, type ExecutionRecord, type Graph, type Item } from "./types.js";
 import type { Journal } from "./journal.js";
 
 function topoSort(graph: Graph): string[] {
@@ -25,23 +25,37 @@ function topoSort(graph: Graph): string[] {
  */
 export async function executeGraph(
   graph: Graph,
-  opts: { tenantId: string; kind?: ExecutionKind; journal: Journal },
+  opts: { tenantId: string; kind?: ExecutionKind; journal: Journal; seedItems?: Item[] },
 ): Promise<ExecutionRecord> {
   const execId = opts.journal.begin({ tenantId: opts.tenantId, kind: opts.kind ?? "flow", graph });
-  const outputs = new Map<string, Item[]>();
+  // Every node's result as branches: plain Item[] is one branch, branch 0.
+  const outputs = new Map<string, Item[][]>();
+  const nodeIds = new Map<string, string>();
+  for (const n of graph.nodes) {
+    const name = (n.params?.n8nName as string) ?? n.id;
+    nodeIds.set(name, n.id);
+  }
   let failed = false;
 
   for (const nodeId of topoSort(graph)) {
     const gn = graph.nodes.find((n) => n.id === nodeId)!;
     const def = getNode(gn.node);
-    const input = graph.edges.filter((e) => e.to === nodeId).flatMap((e) => outputs.get(e.from) ?? []);
+    const incoming = graph.edges.filter((e) => e.to === nodeId);
+    const input = incoming.length
+      ? incoming.flatMap((e) => outputs.get(e.from)?.[e.branch ?? 0] ?? [])
+      : (opts.seedItems ?? []);
     const startedAt = new Date().toISOString();
     try {
       if (!def) throw new Error(`Unknown node type: ${gn.node}`);
-      const output = await def.run(gn.params, input, { tenantId: opts.tenantId });
-      outputs.set(nodeId, output);
+      const result = await def.run(gn.params, input, {
+        tenantId: opts.tenantId,
+        outputs,
+        nodeIds,
+      });
+      const branches = branchesOf(result) ?? [result];
+      outputs.set(nodeId, branches);
       opts.journal.recordStep(execId, {
-        nodeId, node: gn.node, params: gn.params, input, output,
+        nodeId, node: gn.node, params: gn.params, input, output: result,
         status: "ok", startedAt, finishedAt: new Date().toISOString(),
       });
     } catch (err) {

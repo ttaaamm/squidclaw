@@ -107,7 +107,7 @@ describe("n8n import", () => {
     registerBuiltinNodes();
   });
 
-  it("preserves shape and wiring, and maps http nodes", () => {
+  it("preserves shape and wiring as runnable n8n.step dispatchers", () => {
     const { graph, unsupported } = importN8nWorkflow({
       name: "invoice bot",
       nodes: [
@@ -121,10 +121,14 @@ describe("n8n import", () => {
       },
     });
 
-    expect(graph.nodes.map((n) => n.node)).toEqual(["echo", "http.request", "unsupported.node"]);
-    expect(graph.nodes[1].params).toMatchObject({ url: "https://api.example.com", method: "POST" });
+    expect(graph.nodes.map((n) => n.node)).toEqual(["n8n.step", "n8n.step", "n8n.step"]);
+    expect(graph.nodes[1].params).toMatchObject({
+      type: "n8n-nodes-base.httpRequest",
+      n8nName: "Fetch",
+      parameters: { url: "https://api.example.com", method: "POST" },
+    });
     expect(graph.edges).toHaveLength(2);
-    expect(unsupported).toEqual([{ node: "Telegram", type: "n8n-nodes-base.telegram" }]);
+    expect(unsupported).toEqual([]); // the whole dialect is spoken now
   });
 
   it("skips disabled nodes", () => {
@@ -158,7 +162,7 @@ describe("the arsenal is registered", () => {
     registerBuiltinNodes();
     expect(listNodes().map((n) => n.name).sort()).toEqual([
       "audio.transcribe", "browser.snap", "canvas.snap", "doc.read", "echo",
-      "email.read", "email.send", "gotenberg.render", "http.request",
+      "email.read", "email.send", "gotenberg.render", "http.request", "n8n.step",
       "pdf.create", "pptx.create", "shell.exec", "squidflow.import", "ssh.exec",
       "telegram.poll", "telegram.send", "unsupported.node", "vision.look",
       "voice.say", "web.read", "web.search",

@@ -6,6 +6,26 @@ export interface Item {
 
 export interface NodeContext {
   tenantId: string;
+  /** During a graph run: previous nodes' outputs by node id — lets compat code reach back like n8n's $('Node'). */
+  outputs?: Map<string, Item[][]>;
+  /** Maps a node's display name to its id, for the same reach-back. */
+  nodeIds?: Map<string, string>;
+}
+
+const BRANCHES = Symbol.for("squidclaw.branches");
+
+/**
+ * Branching nodes (IF/Switch) return their items with per-branch streams
+ * attached — invisibly, so every ordinary node stays a plain Item[].
+ */
+export function withBranches(outputs: Item[][]): Item[] {
+  const flat = outputs.flat();
+  (flat as unknown as Record<symbol, Item[][]>)[BRANCHES] = outputs;
+  return flat;
+}
+
+export function branchesOf(items: Item[]): Item[][] | undefined {
+  return (items as unknown as Record<symbol, Item[][] | undefined>)[BRANCHES];
 }
 
 /** A capability the agent can call. Tool-call shaped so flows/nodes are agent-callable. */
@@ -28,7 +48,8 @@ export interface GraphNode {
 
 export interface Graph {
   nodes: GraphNode[];
-  edges: { from: string; to: string }[];
+  /** `branch` picks which of the upstream node's outputs flows here (default 0). */
+  edges: { from: string; to: string; branch?: number }[];
 }
 
 export interface StepRecord {

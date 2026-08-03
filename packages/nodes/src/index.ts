@@ -4,7 +4,8 @@ import { httpRequestNode } from "./http-request.js";
 import { shellExecNode, sshExecNode } from "./shell.js";
 import { webSearchNode, webReadNode } from "./web.js";
 import { pdfCreateNode, pptxCreateNode } from "./documents.js";
-import { n8nImportNode, unsupportedNode } from "./n8n-import.js";
+import { squidflowImportNode, unsupportedNode } from "./n8n-import.js";
+import { n8nStepNode } from "./n8n-step.js";
 import { telegramSendNode, telegramPollNode } from "./telegram.js";
 import { visionLookNode, voiceSayNode, transcribeNode } from "./senses.js";
 import { emailSendNode, emailReadNode } from "./email.js";
@@ -17,6 +18,7 @@ export * from "./shell.js";
 export * from "./web.js";
 export * from "./documents.js";
 export * from "./n8n-import.js";
+export * from "./n8n-step.js";
 export * from "./mcp.js";
 export * from "./telegram.js";
 export * from "./gotenberg.js";
@@ -34,7 +36,8 @@ export function registerBuiltinNodes(): void {
     webReadNode,
     pdfCreateNode,
     pptxCreateNode,
-    n8nImportNode,
+    squidflowImportNode,
+    n8nStepNode,
     unsupportedNode,
     telegramSendNode(),
     gotenbergRenderNode(),
