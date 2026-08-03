@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { clearNodes, registerNode, Journal } from "@squidclaw/kernel";
 import { Agent, FlowStore, VibeState, DEFAULT_VIBES } from "@squidclaw/agent";
 import { ReflexStore } from "@squidclaw/reflexes";
+import { SemanticMemory } from "@squidclaw/memory";
 import { habitRunner, type Booted } from "./../src/boot.js";
 
 function booted(): Booted {
@@ -21,6 +22,7 @@ function booted(): Booted {
     flows,
     reflexes: new ReflexStore(join(dir, "reflexes")),
     journal,
+    memory: new SemanticMemory(join(dir, "memory")),
     vibes: new VibeState(DEFAULT_VIBES),
     agent: new Agent({ brains: null as never, journal, tenantId: "dev", innerMe: "", flows }),
     workspace: dir,

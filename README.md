@@ -39,6 +39,7 @@ npm run heartbeat         # talk to it in your terminal
 
 ```bash
 npm run dev               # talk to it on Telegram (needs TELEGRAM_BOT_TOKEN)
+npm run canvas            # watch its mind at http://127.0.0.1:4200
 npm run journal -- list   # everything it has ever done
 npm run journal -- show <id>
 ```
@@ -83,6 +84,7 @@ packages/
 ├── agent/      # improviser, vibes, crystallizer, healer
 ├── nodes/      # what it can do — web, shell, ssh, documents, mcp, n8n import
 ├── reflexes/   # cron engine, trigger store, scheduler, webhook server
+├── canvas/     # the window into its mind — layout, read-only API, live page
 ├── surfaces/   # its faces: telegram, terminal
 └── server/     # runners + journal CLI
 ```
@@ -165,14 +167,35 @@ it was:
 No stack traces at 3am. Set `SQUIDCLAW_HOME_CHAT` and those reports arrive on
 Telegram.
 
-## Status
-
-**Phase 3 — Reflexes & healing, complete.** It thinks, acts, speaks, remembers,
-forms habits, fires them unasked, and repairs itself. It does not yet show you
-its mind on a canvas (Phase 4) or serve multiple tenants (Phase 5).
+## The canvas — a window into its mind
 
 ```bash
-npm test        # 116 tests
+npm run canvas    # → http://127.0.0.1:4200
+```
+
+A read-only dashboard, live over server-sent events because the agent acts on
+its own and the page shouldn't need refreshing:
+
+- **Habits** it runs without thinking, and drafts awaiting your yes
+- **Reflexes** armed, with their schedules and how the last firing went
+- **Everything it has lived** — every run, newest first, with its shape and duration
+- Click a run to see the **graph laid out left to right**, each step green or red
+- Click a step to see the **exact params, input and output** — the thing that
+  makes debugging an agent tractable
+
+The spec called for React Flow. This canvas is deliberately read-only, so it's
+hand-drawn SVG instead: no bundler, no framework, no build step, and it ships
+inside the same Node process the agent already runs in. React Flow earns its
+weight when a canvas becomes editable — that's a Phase 5 decision, not this one.
+
+## Status
+
+**Phase 4 — Canvas, complete.** It thinks, acts, speaks, remembers, forms
+habits, fires them unasked, repairs itself, and shows you its mind. It does not
+yet serve multiple tenants (Phase 5) or ship as a self-host package (Phase 6).
+
+```bash
+npm test        # 130 tests
 npm run typecheck
 ```
 

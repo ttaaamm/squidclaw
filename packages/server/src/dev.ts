@@ -2,7 +2,8 @@ import "dotenv/config";
 import { listNodes } from "@squidclaw/kernel";
 import { TelegramSurface } from "@squidclaw/surfaces";
 import { Scheduler, WebhookServer } from "@squidclaw/reflexes";
-import { bootAgent, habitRunner, handleCommand, requireEnv } from "./boot.js";
+import { DashboardServer } from "@squidclaw/canvas";
+import { bootAgent, dashboardSources, habitRunner, handleCommand, requireEnv } from "./boot.js";
 
 requireEnv("TELEGRAM_BOT_TOKEN");
 
@@ -36,9 +37,13 @@ const hooks = new WebhookServer(reflexes, runHabit, {
 });
 const port = await hooks.listen(Number(process.env.SQUIDCLAW_PORT ?? 4100));
 
+const dashboard = new DashboardServer(dashboardSources(booted));
+const uiPort = await dashboard.listen(Number(process.env.SQUIDCLAW_UI_PORT ?? 4200));
+
 console.log(`🫀 SquidClaw heartbeat: listening on Telegram (long-polling). Ctrl+C to stop.`);
 console.log(`   thinking via: ${via} · tools: ${listNodes().length}${mcp.registered.length ? ` (${mcp.registered.length} via MCP)` : ""}`);
 console.log(`   habits: ${flows.promoted().length} learned, ${flows.drafts().length} awaiting your yes`);
 console.log(`   reflexes: ${reflexes.enabled().length} armed · hooks on http://127.0.0.1:${port}`);
+console.log(`   🧠 its mind: http://127.0.0.1:${uiPort}`);
 if (!homeChat) console.log(`   (set SQUIDCLAW_HOME_CHAT to a chat id to get reflex + healing reports on Telegram)`);
 for (const [server, err] of Object.entries(mcp.failed)) console.log(`   ⚠️  MCP "${server}" failed: ${err}`);

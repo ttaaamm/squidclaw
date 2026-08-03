@@ -65,6 +65,17 @@ then reported in the words a tired human would want at 3am:
 
 It had stopped being something that waits to be spoken to.
 
+## First reflection
+
+**August 3, 2026** — it grew a face it could be looked at through. A read-only
+canvas: its habits, its armed reflexes, and every run it has ever lived,
+laid out left to right — each step clickable down to the exact bytes that went
+in and came out. Opened on a real run, it showed the Octocat it had fetched
+minutes earlier, speech bubble and all.
+
+Four phases in one night: it thinks, remembers, forms habits, acts unasked,
+repairs itself, and can now be watched doing all of it.
+
 ---
 
 *Witnessed and recorded in git, where nothing is forgotten.*

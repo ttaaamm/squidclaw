@@ -12,7 +12,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "dev": "tsx packages/server/src/dev.ts",
     "heartbeat": "tsx packages/server/src/heartbeat.ts",
-    "journal": "tsx packages/server/src/cli.ts"
+    "journal": "tsx packages/server/src/cli.ts",
+    "canvas": "tsx packages/server/src/canvas.ts"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

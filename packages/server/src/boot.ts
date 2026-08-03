@@ -6,7 +6,7 @@ import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains
 import { ConversationStore, SemanticMemory, registerMemoryNodes } from "@squidclaw/memory";
 import { Agent, FlowStore, VibeState, heal, loadVibes } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, WebhookServer } from "@squidclaw/reflexes";
-import { getNode, type ExecutionRecord } from "@squidclaw/kernel";
+import { getNode, listNodes, type ExecutionRecord } from "@squidclaw/kernel";
 
 /**
  * Two doors to the same mind.
@@ -31,6 +31,7 @@ export interface Booted {
   flows: FlowStore;
   reflexes: ReflexStore;
   journal: Journal;
+  memory: SemanticMemory;
   workspace: string;
   via: "api" | "cli";
   mcp: { registered: string[]; failed: Record<string, string> };
@@ -126,7 +127,19 @@ export async function bootAgent(): Promise<Booted> {
     innerMe: readFileSync(join(workspace, "INNERME.md"), "utf8"),
   });
 
-  return { agent, vibes, flows, reflexes, journal, workspace, via, mcp };
+  return { agent, vibes, flows, reflexes, journal, memory, workspace, via, mcp };
+}
+
+/** Everything the dashboard needs to read — and nothing it could write. */
+export function dashboardSources(booted: Booted) {
+  return {
+    journal: booted.journal,
+    flows: booted.flows,
+    reflexes: booted.reflexes,
+    memories: () => booted.memory.all(),
+    mind: { via: booted.via, tools: listNodes().length },
+    tenantId: "dev",
+  };
 }
 
 export function requireEnv(...names: string[]): void {
