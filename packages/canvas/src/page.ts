@@ -105,9 +105,10 @@ const dur = (ms) => ms == null ? '' : ms < 1000 ? ms + 'ms' : (ms/1000).toFixed(
 let state = null, runs = [], selected = null, selectedNode = null;
 let showRoutine = false;
 
-// The canvas is for real work. A run earns its place by being a habit run or
-// genuinely multi-step; plain chat and one-tool fetches are routine.
-const isSignificant = (e) => e.kind === "flow" || e.steps >= 2;
+// The canvas is for workflows. Only habit runs — deterministic flows the
+// agent crystallized and the human promoted — earn the front page.
+// Everything improvised is the agent's private thinking, folded away.
+const isSignificant = (e) => e.kind === "flow";
 
 async function load() {
   [state, runs] = await Promise.all([
@@ -158,15 +159,15 @@ function renderSide() {
 
   const routineToggle =
     '<button class="row" id="routine-toggle" style="color:var(--dim);font-size:12px">' +
-    (showRoutine ? 'hide routine runs' : (hidden > 0 ? 'show ' + hidden + ' routine run' + (hidden === 1 ? '' : 's') + ' (chat, single steps)' : '')) +
+    (showRoutine ? 'hide improvised runs' : (hidden > 0 ? 'show ' + hidden + ' improvised run' + (hidden === 1 ? '' : 's') + ' (its thinking)' : '')) +
     '</button>';
 
   $('#side').innerHTML =
     (habitRows ? group('Habits — runs without thinking', habitRows) : '') +
     (draftRows ? group('Draft habits', draftRows) : '') +
     (reflexRows ? group('Reflexes', reflexRows) : '') +
-    group('Flows it has run',
-      (runRows || '<p class="empty">No real flows yet — multi-step work lands here.</p>') +
+    group('Workflow runs',
+      (runRows || '<p class="empty">No workflow runs yet — when you /promote a habit, its runs land here.</p>') +
       ((showRoutine || hidden > 0) ? routineToggle : ''));
 
   $('#side').querySelectorAll('[data-run]').forEach(b =>
