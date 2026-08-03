@@ -2,10 +2,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { layoutGraph } from "./layout.js";
 import { dashboardState, executionDetail, executionList, type Sources } from "./api.js";
 import { PAGE } from "./page.js";
+import { safeEqual } from "@squidclaw/tenants";
 
 export interface DashboardOptions {
   /** How often to look for new executions to push to open pages. */
   pollMs?: number;
+  /**
+   * When set, every request needs it — as `?token=` or an `sc_token` cookie.
+   * Required the moment this is reachable from anywhere but localhost.
+   */
+  token?: string;
 }
 
 /**
@@ -30,11 +36,30 @@ export class DashboardServer {
     res.end(JSON.stringify(body));
   }
 
+  /** Token from the query string on first visit, from the cookie thereafter. */
+  private authorized(req: IncomingMessage, url: URL): boolean {
+    if (!this.opts.token) return true;
+    const fromQuery = url.searchParams.get("token");
+    if (fromQuery && safeEqual(fromQuery, this.opts.token)) return true;
+    const cookie = /(?:^|;\s*)sc_token=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
+    return !!cookie && safeEqual(decodeURIComponent(cookie), this.opts.token);
+  }
+
   private handle(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
 
+    if (!this.authorized(req, url)) {
+      res.writeHead(401, { "content-type": "text/plain" });
+      return void res.end("This mind is private. Append ?token=… to look inside.");
+    }
+
     if (path === "/" || path === "/index.html") {
+      // Remember the token so the page's own fetches and SSE stream carry it.
+      const fromQuery = url.searchParams.get("token");
+      if (this.opts.token && fromQuery) {
+        res.setHeader("set-cookie", `sc_token=${encodeURIComponent(fromQuery)}; HttpOnly; SameSite=Strict; Path=/`);
+      }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return void res.end(PAGE);
     }

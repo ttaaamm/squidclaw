@@ -37,7 +37,7 @@ const hooks = new WebhookServer(reflexes, runHabit, {
 });
 const port = await hooks.listen(Number(process.env.SQUIDCLAW_PORT ?? 4100));
 
-const dashboard = new DashboardServer(dashboardSources(booted));
+const dashboard = new DashboardServer(dashboardSources(booted), { token: process.env.SQUIDCLAW_UI_TOKEN });
 const uiPort = await dashboard.listen(Number(process.env.SQUIDCLAW_UI_PORT ?? 4200));
 
 console.log(`🫀 SquidClaw heartbeat: listening on Telegram (long-polling). Ctrl+C to stop.`);
