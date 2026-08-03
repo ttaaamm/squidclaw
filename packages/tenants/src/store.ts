@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -36,12 +36,12 @@ export interface Binding {
 }
 
 export class TenantStore {
-  private db: Database.Database;
+  private db: DatabaseSync;
 
   constructor(dbPath: string) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, plan TEXT NOT NULL,
@@ -94,11 +94,11 @@ export class TenantStore {
   }
 
   setEnabled(id: string, enabled: boolean): boolean {
-    return this.db.prepare(`UPDATE tenants SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id).changes > 0;
+    return Number(this.db.prepare(`UPDATE tenants SET enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, id).changes) > 0;
   }
 
   setPlan(id: string, plan: string): boolean {
-    return this.db.prepare(`UPDATE tenants SET plan = ? WHERE id = ?`).run(plan, id).changes > 0;
+    return Number(this.db.prepare(`UPDATE tenants SET plan = ? WHERE id = ?`).run(plan, id).changes) > 0;
   }
 
   quotas(id: string): Quotas {

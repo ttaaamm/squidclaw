@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -15,15 +15,15 @@ export interface Turn {
  * never bleed into each other.
  */
 export class ConversationStore {
-  private db: Database.Database;
+  private db: DatabaseSync;
 
   constructor(
     dbPath: string,
     private maxTurns = 20,
   ) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS turns (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +45,7 @@ export class ConversationStore {
         `SELECT role, content, at FROM turns
          WHERE tenant_id = ? AND chat_id = ? ORDER BY id DESC LIMIT ?`,
       )
-      .all(tenantId, chatId, this.maxTurns) as Turn[];
+      .all(tenantId, chatId, this.maxTurns) as unknown as Turn[];
     return rows.reverse();
   }
 

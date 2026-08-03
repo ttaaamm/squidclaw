@@ -1,17 +1,23 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ExecutionKind, ExecutionRecord, Graph, StepRecord } from "./types.js";
 
-/** What the agent has lived. Every execution, every step, every input and output. */
+/**
+ * What the agent has lived. Every execution, every step, every input and output.
+ *
+ * Uses Node's built-in SQLite rather than a native module: no compiler, no
+ * node-gyp, no build tools on any machine that runs this — which is what
+ * makes self-hosting a download rather than a project.
+ */
 export class Journal {
-  private db: Database.Database;
+  private db: DatabaseSync;
 
   constructor(dbPath: string) {
     if (dbPath !== ":memory:") mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
+    this.db = new DatabaseSync(dbPath);
+    this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS executions (
         id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, kind TEXT NOT NULL,
