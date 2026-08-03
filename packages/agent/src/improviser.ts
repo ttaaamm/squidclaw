@@ -39,6 +39,21 @@ export interface AgentOptions {
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
 const AUTO_READ_CHARS = 4_000;
+/** A tool result bigger than this gets trimmed — context is for thinking, not dumping. */
+const TOOL_RESULT_CHARS = 3_000;
+
+/**
+ * The discipline layer — the difference between a demo and a colleague.
+ * Identity lives in INNERME.md; this is craft, and it applies to every agent.
+ */
+const BEHAVIOR = `## Discipline
+- Act first: if a tool can answer it, use the tool before speculating. Never invent tool results or pretend to have checked something.
+- Answer in the language the human wrote in. Arabic gets Arabic.
+- This is chat: short answers win. No walls of text, no bullet-point essays unless asked. One "sorry" is enough.
+- Never say "As an AI", "I'd be happy to help", or "Great question!".
+- If the request is ambiguous in a way that changes the outcome, ask one short question instead of guessing.
+- When a tool fails, say what you tried and what broke — in plain words, then suggest the next move.
+- Numbers, dates, names: verify with a tool when you can; say "I'm not certain" when you can't.`;
 
 const EXTRACT_SCHEMA_HINT =
   'Reply ONLY with JSON: {"facts":[{"name":"short-slug","content":"the fact"}]} — durable facts about the human ' +
@@ -227,8 +242,15 @@ export class Agent {
   }
 
   /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
-  private systemPrompt(chatId: string): string {
-    const parts = [this.opts.innerMe];
+  private systemPrompt(chatId: string, surface?: string): string {
+    const parts = [this.opts.innerMe, BEHAVIOR];
+
+    // Situational awareness: an agent that doesn't know the date feels broken.
+    const now = new Date();
+    parts.push(
+      `## Now\n${now.toISOString()} (${now.toUTCString().slice(0, 3)})` +
+        (surface ? ` — speaking on ${surface}` : ""),
+    );
 
     if (this.opts.vibes) parts.push(this.opts.vibes.prompt(chatId));
 
@@ -254,6 +276,7 @@ export class Agent {
     text: string,
     chatId = "default",
     onProgress?: (note: string) => void,
+    meta?: { surface?: string },
   ): Promise<string> {
     const { brains, journal, tenantId, conversation } = this.opts;
     const tools: ToolSpec[] = this.available().map((n) => ({
@@ -306,7 +329,7 @@ export class Agent {
         onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId),
+          system: this.systemPrompt(chatId, meta?.surface),
           messages,
           tools,
         });
@@ -342,11 +365,16 @@ export class Agent {
             startedAt, finishedAt: new Date().toISOString(),
           });
 
+          // Context is for thinking, not dumping — a huge result gets a haircut.
+          let resultContent = error ?? JSON.stringify(output.slice(0, 5).map((i) => i.json));
+          if (resultContent.length > TOOL_RESULT_CHARS) {
+            resultContent = `${resultContent.slice(0, TOOL_RESULT_CHARS)}… [trimmed ${resultContent.length - TOOL_RESULT_CHARS} chars — ask for specifics if needed]`;
+          }
           toolResults.push({
             type: "tool_result",
             tool_use_id: call.id,
             is_error: !!error,
-            content: error ?? JSON.stringify(output.slice(0, 5).map((i) => i.json)),
+            content: resultContent,
           });
         }
         messages.push({ role: "user", content: toolResults });
@@ -358,7 +386,7 @@ export class Agent {
         onProgress?.("wrapping up…");
         const final = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId),
+          system: this.systemPrompt(chatId, meta?.surface),
           messages: [
             ...messages,
             {

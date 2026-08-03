@@ -310,7 +310,7 @@ export class Platform {
     const denied = this.tenants.checkQuota(tenant.id, "thought");
     if (denied) return `⏳ ${denied}`;
 
-    const reply = await organism.agent.handleMessage(text, chatId, progress);
+    const reply = await organism.agent.handleMessage(text, chatId, progress, { surface });
     this.tenants.record(tenant.id, "thought");
     return reply;
   }

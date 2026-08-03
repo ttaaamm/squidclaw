@@ -29,6 +29,7 @@ function renderTools(tools: ToolSpec[]): string {
     ...tools.map((t) => `- ${t.name}: ${t.description}\n  input schema: ${JSON.stringify(t.input_schema)}`),
     "",
     'To use one, answer with action "use_tool", the tool name, and its input.',
+    "Prefer using a tool over speculating. After a tool result arrives, either use the next tool or give the final reply.",
     'When the task is done, or no tool is needed, answer with action "reply" and your reply text.',
   ].join("\n");
 }
@@ -92,8 +93,14 @@ export class CliBrain implements Mind {
     ];
     if (req.system) args.push("--append-system-prompt", req.system);
 
-    const raw = await this.exec(args, this.timeoutMs);
-    const decision = parseDecision(raw);
+    // One retry: a single garbled output or transient CLI hiccup must not
+    // derail a whole conversation turn.
+    let decision: Decision;
+    try {
+      decision = parseDecision(await this.exec(args, this.timeoutMs));
+    } catch {
+      decision = parseDecision(await this.exec(args, this.timeoutMs));
+    }
 
     if (decision.action === "use_tool" && decision.tool) {
       const block = {
