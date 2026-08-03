@@ -24,6 +24,8 @@ export interface BridgeStep {
   params: Record<string, unknown>;
   output: Item[];
   error?: string;
+  startedAt: string;
+  finishedAt: string;
 }
 
 export interface ToolBridge {
@@ -72,12 +74,19 @@ export function startToolBridge(opts: {
             const tool = byMcpName.get(name);
             if (!tool) return send(404, { error: `no tool "${name}"` });
             opts.onProgress?.(`running ${tool.name}…`);
+            const startedAt = new Date().toISOString();
             try {
               const output = await tool.run(args ?? {}, [], { tenantId: opts.tenantId });
-              opts.onStep({ node: tool.name, params: args ?? {}, output });
+              opts.onStep({
+                node: tool.name, params: args ?? {}, output,
+                startedAt, finishedAt: new Date().toISOString(),
+              });
               send(200, { ok: true, result: output.slice(0, 5).map((i) => i.json) });
             } catch (err) {
-              opts.onStep({ node: tool.name, params: args ?? {}, output: [], error: String(err) });
+              opts.onStep({
+                node: tool.name, params: args ?? {}, output: [], error: String(err),
+                startedAt, finishedAt: new Date().toISOString(),
+              });
               send(200, { ok: false, error: String(err) });
             }
           } catch {

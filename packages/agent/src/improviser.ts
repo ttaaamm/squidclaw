@@ -327,7 +327,7 @@ export class Agent {
         journal.recordStep(execId, {
           nodeId, node: step.node, params: step.params, input: [], output: step.output,
           status: step.error ? "error" : "ok", error: step.error,
-          startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+          startedAt: step.startedAt, finishedAt: step.finishedAt,
         });
       },
     });

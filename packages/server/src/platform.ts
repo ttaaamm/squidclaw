@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { Journal } from "@squidclaw/kernel";
+import { Journal, listNodes } from "@squidclaw/kernel";
 import type { Mind } from "@squidclaw/brains";
 import {
   ConversationStore, KnowledgeBase, Profiles, SemanticMemory,
@@ -81,7 +81,7 @@ export class Platform {
       flows,
       reflexes,
       memories: () => memory.all(),
-      mind: { via: this.opts.via, tools: 0 },
+      mind: { via: this.opts.via, tools: listNodes().length + 16 },
       tenantId,
     };
   }
