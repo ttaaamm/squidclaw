@@ -150,6 +150,7 @@ export class WhatsAppSurface implements ChatSurface {
 
     try {
       const reply = await this.onMessage(msg.chatId, msg.text, progress);
+      if (!reply) return; // the flow spoke for itself
       await socket.sendText(msg.chatId, reply);
     } catch (err) {
       await socket.sendText(msg.chatId, `⚠️ ${err instanceof Error ? err.message : String(err)}`).catch(() => {});

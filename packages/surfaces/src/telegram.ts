@@ -104,6 +104,7 @@ export class TelegramSurface implements ChatSurface {
     try {
       const text = await produceText();
       const reply = await this.onMessage(String(ctx.chat!.id), text, progress);
+      if (!reply) return; // the flow spoke for itself
       await ctx.reply(reply);
     } catch (err) {
       await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);

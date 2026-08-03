@@ -244,6 +244,78 @@ export class Platform {
     return birthAnnouncement(next.result);
   }
 
+  // --- flow sessions ---------------------------------------------------------
+  // A promoted imported flow can take over a chat: every message becomes the
+  // flow's trigger item — the n8n conversation state machine, running here.
+
+  private sessionsPath(tenantId: string): string {
+    return join(this.tenantDir(tenantId), "flow-sessions.json");
+  }
+
+  private flowSessions(tenantId: string): Record<string, string> {
+    const path = this.sessionsPath(tenantId);
+    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, string>) : {};
+  }
+
+  private setFlowSession(tenantId: string, chatId: string, flowName: string | null): void {
+    const sessions = this.flowSessions(tenantId);
+    if (flowName) sessions[chatId] = flowName;
+    else delete sessions[chatId];
+    mkdirSync(this.tenantDir(tenantId), { recursive: true });
+    writeFileSync(this.sessionsPath(tenantId), JSON.stringify(sessions), "utf8");
+  }
+
+  /** The message, dressed as the Telegram update an n8n trigger would emit. */
+  private seedFor(chatId: string, text: string) {
+    const numericChat = Number(chatId);
+    return [
+      {
+        json: {
+          update_id: Math.floor(Math.random() * 1e9),
+          message: {
+            message_id: Math.floor(Math.random() * 1e9),
+            chat: { id: Number.isNaN(numericChat) ? chatId : numericChat, type: "private" },
+            from: { id: Number.isNaN(numericChat) ? chatId : numericChat, first_name: "user" },
+            date: Math.floor(Date.now() / 1000),
+            text,
+          },
+        } as Record<string, unknown>,
+      },
+    ];
+  }
+
+  private async runFlowSession(
+    tenantId: string,
+    chatId: string,
+    flowName: string,
+    text: string,
+  ): Promise<string> {
+    const organism = await this.pool.for(tenantId);
+    const flow = organism.flows.promoted().find((f) => f.name === flowName);
+    if (!flow) {
+      this.setFlowSession(tenantId, chatId, null);
+      return `The flow "${flowName}" isn't promoted anymore — session ended.`;
+    }
+    const denied = this.tenants.checkQuota(tenantId, "habit");
+    if (denied) return `⏳ ${denied}`;
+
+    const { executeGraph } = await import("@squidclaw/kernel");
+    const rec = await executeGraph(flow.graph, {
+      tenantId,
+      kind: "flow",
+      journal: organism.journal,
+      seedItems: this.seedFor(chatId, text),
+    });
+    this.tenants.record(tenantId, "habit");
+
+    if (rec.status === "error") {
+      const failed = rec.steps.find((s) => s.status === "error");
+      return `⚠️ The flow hit a wall at ${String(failed?.params?.n8nName ?? failed?.node ?? "?")}: ${String(failed?.error ?? "").slice(0, 200)}\n(/flow off to leave the flow)`;
+    }
+    // The flow speaks for itself — its own telegram steps already replied.
+    return "";
+  }
+
   /** Fully forget a warm organism — pool, scheduler, and the warm map together. */
   private evictOrganism(tenantId: string): void {
     this.schedulers.get(tenantId)?.stop();
@@ -340,6 +412,34 @@ export class Platform {
     if (!this.hatched(tenant.id)) return this.hatchStep(tenant.id, text);
 
     const organism = await this.pool.for(tenant.id);
+
+    // Flow sessions: hand this chat to an imported flow, message by message.
+    if (trimmed.startsWith("/flow")) {
+      const arg = trimmed.split(/\s+/)[1];
+      if (!arg) {
+        const active = this.flowSessions(tenant.id)[chatId];
+        return active
+          ? `This chat is inside the "${active}" flow. /flow off to leave.`
+          : "Usage: /flow <promoted-flow-name> to hand this chat to a flow · /flow off to leave.";
+      }
+      if (arg === "off") {
+        this.setFlowSession(tenant.id, chatId, null);
+        return "Left the flow — you're talking to me again.";
+      }
+      const organism = await this.pool.for(tenant.id);
+      if (!organism.flows.promoted().some((f) => f.name === arg)) {
+        return `"${arg}" isn't a promoted flow. /habits shows what's available; /promote <name> blesses a draft.`;
+      }
+      this.setFlowSession(tenant.id, chatId, arg);
+      // Fire the flow once immediately, as n8n would on the trigger message.
+      const first = await this.runFlowSession(tenant.id, chatId, arg, text);
+      return first || `▶️ This chat now runs the "${arg}" flow — every message goes straight to it. /flow off to leave.`;
+    }
+
+    const activeFlow = this.flowSessions(tenant.id)[chatId];
+    if (activeFlow && !trimmed.startsWith("/")) {
+      return this.runFlowSession(tenant.id, chatId, activeFlow, text);
+    }
 
     // The window into its own mind — a one-time link, minted for this tenant only.
     if (trimmed === "/canvas") {
