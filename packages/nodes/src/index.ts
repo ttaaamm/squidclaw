@@ -7,6 +7,7 @@ import { pdfCreateNode, pptxCreateNode } from "./documents.js";
 import { n8nImportNode, unsupportedNode } from "./n8n-import.js";
 import { telegramSendNode, telegramPollNode } from "./telegram.js";
 import { visionLookNode, voiceSayNode, transcribeNode } from "./senses.js";
+import { emailSendNode, emailReadNode } from "./email.js";
 import { docReadNode } from "./doc-read.js";
 import { gotenbergRenderNode, canvasSnapNode, browserSnapNode } from "./gotenberg.js";
 
@@ -21,6 +22,7 @@ export * from "./telegram.js";
 export * from "./gotenberg.js";
 export * from "./senses.js";
 export * from "./doc-read.js";
+export * from "./email.js";
 
 export function registerBuiltinNodes(): void {
   for (const node of [
@@ -43,6 +45,8 @@ export function registerBuiltinNodes(): void {
     docReadNode(),
     browserSnapNode(),
     telegramPollNode(),
+    emailSendNode(),
+    emailReadNode(),
   ]) {
     registerNode(node);
   }
