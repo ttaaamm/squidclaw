@@ -162,8 +162,8 @@ const TEX = {
   amber: glowTexture('rgba(255,250,240,1)', 'rgba(255,179,92,.9)'),
   red: glowTexture('rgba(255,240,244,1)', 'rgba(255,92,122,.9)'),
   dim: glowTexture('rgba(180,200,225,.9)', 'rgba(70,95,130,.6)'),
-  halo: glowTexture('rgba(79,195,255,.35)', 'rgba(79,195,255,.12)'),
-  haloAmber: glowTexture('rgba(255,179,92,.4)', 'rgba(255,179,92,.14)'),
+  halo: glowTexture('rgba(79,195,255,.2)', 'rgba(79,195,255,.06)'),
+  haloAmber: glowTexture('rgba(255,179,92,.24)', 'rgba(255,179,92,.07)'),
 };
 function sprite(tex, size, opacity) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
@@ -181,7 +181,7 @@ function starField(count, color, size, spread) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   return new THREE.Points(geo, new THREE.PointsMaterial({
-    color, size, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    color, size, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   }));
 }
 ambient.add(starField(500, 0x4fc3ff, 1.1, 620));
@@ -214,7 +214,7 @@ function dendriteTree(count, length, seed, tipSize) {
       const tend = end.clone().add(tdir.multiplyScalar(length * (0.3 + rand() * 0.35)));
       const tcurve = new THREE.QuadraticBezierCurve3(end, end.clone().lerp(tend, .5).add(new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).multiplyScalar(length * .12)), tend);
       tree.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(tcurve.getPoints(8)), mat));
-      const tip = sprite(rand() < 0.3 ? TEX.amber : TEX.cyan, tipSize * (0.7 + rand() * 0.6), .9);
+      const tip = sprite(rand() < 0.3 ? TEX.amber : TEX.cyan, tipSize * (0.7 + rand() * 0.6), .55);
       tip.position.copy(tend);
       tree.add(tip);
     }
@@ -225,9 +225,9 @@ function dendriteTree(count, length, seed, tipSize) {
 /* ————— the brain ————— */
 const brain = new THREE.Group(); scene.add(brain);
 const core = new THREE.Group();
-core.add(sprite(TEX.cyan, 30), sprite(TEX.halo, 95, .9), sprite(TEX.halo, 55, .9));
+core.add(sprite(TEX.cyan, 20), sprite(TEX.halo, 62, .55), sprite(TEX.halo, 38, .55));
 // The cell body wears a crown of dendrites, like the reference image's core.
-core.add(dendriteTree(11, 34, 7, 1.6));
+core.add(dendriteTree(11, 34, 7, 1.0));
 brain.add(core);
 
 let state = null, runs = [];
@@ -272,18 +272,18 @@ function buildBrain() {
     const pos = neuronPosition(i, flows.length, f.name);
     const group = new THREE.Group();
     group.position.copy(pos);
-    const coreSprite = sprite(f.draft ? TEX.dim : TEX.cyan, 10);
-    const halo = sprite(TEX.halo, 30, .8);
+    const coreSprite = sprite(f.draft ? TEX.dim : TEX.cyan, 7.5);
+    const halo = sprite(TEX.halo, 19, .5);
     coreSprite.userData = { kind: 'neuron', name: f.name };
     // Each job branches onward — the arbor's size comes from the flow itself:
     // more steps, more dendrites. Real anatomy from real data.
     const arborBranches = Math.max(3, Math.min(8, Math.round(((f.params && f.params.length) || 0) + 3 + (f.runs > 5 ? 2 : 0))));
-    const arbor = dendriteTree(arborBranches, 11, hashOf(f.name), 0.9);
+    const arbor = dendriteTree(arborBranches, 11, hashOf(f.name), 0.6);
     group.add(coreSprite, halo, arbor);
     brain.add(group);
     const d = dendrite(new THREE.Vector3(0, 0, 0), pos, f.name);
     brain.add(d.line);
-    const signal = sprite(TEX.amber, 3.2, 0); brain.add(signal);
+    const signal = sprite(TEX.amber, 2.2, 0); brain.add(signal);
     neurons.set(f.name, { flow: f, group, coreSprite, halo, arbor, pos, dendrite: d, signal, cluster: null });
     label(f.name, f.draft ? 'forming' : f.runs + ' runs', group, '', 0, 1e9);
   });
@@ -313,12 +313,12 @@ async function loadCluster(name) {
     const ly = (node.y + 30 - cy) * scale;
     const lz = ((hashOf(node.id) % 14) - 7) * 0.45;
     const p = right.clone().multiplyScalar(lx).add(up.clone().multiplyScalar(-ly)).add(normal.clone().multiplyScalar(lz));
-    const s = sprite(TEX.cyan, 2.6);
+    const s = sprite(TEX.cyan, 2.1);
     s.position.copy(p);
     s.userData = { kind: 'step', flow: name, id: node.id };
-    const hl = sprite(TEX.halo, 7, .7); hl.position.copy(p);
+    const hl = sprite(TEX.halo, 4.6, .38); hl.position.copy(p);
     // Every job ends in more ends: a small terminal arbor per step.
-    const twig = dendriteTree(3, 2.4, hashOf(node.id), 0.5);
+    const twig = dendriteTree(3, 2.4, hashOf(node.id), 0.35);
     twig.position.copy(p);
     cluster.add(s, hl, twig);
     const stepName = (info.params && info.params.n8nName) ? info.params.n8nName : node.node;
@@ -511,10 +511,10 @@ function animate() {
   const camDist = (p) => camera.position.distanceTo(p);
   for (const [name, n] of neurons) {
     const pulse = n.running ? 1 + Math.sin(t * 5) * 0.22 : 1;
-    n.coreSprite.scale.setScalar(10 * pulse);
-    n.halo.scale.setScalar(30 * (n.running ? 1 + Math.sin(t * 5) * 0.12 : 1));
+    n.coreSprite.scale.setScalar(7.5 * pulse);
+    n.halo.scale.setScalar(19 * (n.running ? 1 + Math.sin(t * 5) * 0.12 : 1));
     if (n.running) {
-      n.signal.material.opacity = 0.95;
+      n.signal.material.opacity = 0.75;
       n.signal.position.copy(n.dendrite.curve.getPoint((t * 0.45 + hashOf(name) % 10 / 10) % 1));
     } else n.signal.material.opacity = 0;
     // Semantic zoom: the inner network breathes in as you approach.
@@ -524,11 +524,11 @@ function animate() {
       n.cluster.group.visible = near > 0.02;
       n.cluster.group.children.forEach(ch => { if (ch.material) ch.material.opacity = Math.min(1, near) * (ch.userData.kind ? 1 : 0.6); });
       const shrink = 1 - near * 0.75;
-      n.coreSprite.scale.setScalar(10 * pulse * shrink);
-      n.halo.scale.setScalar(30 * shrink);
+      n.coreSprite.scale.setScalar(7.5 * pulse * shrink);
+      n.halo.scale.setScalar(19 * shrink);
       n.arbor.scale.setScalar(shrink); // the outer arbor folds away as you enter
       for (const [, obj] of n.cluster.steps) {
-        if (obj.pulsing) { obj.sprite.scale.setScalar(2.6 * (1 + Math.sin(t * 6) * 0.3)); obj.halo.scale.setScalar(7 * (1 + Math.sin(t * 6) * 0.2)); }
+        if (obj.pulsing) { obj.sprite.scale.setScalar(2.1 * (1 + Math.sin(t * 6) * 0.3)); obj.halo.scale.setScalar(4.6 * (1 + Math.sin(t * 6) * 0.2)); }
       }
     } else if (d < 60) loadCluster(name);
   }
