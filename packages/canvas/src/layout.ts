@@ -24,11 +24,22 @@ export interface Layout {
   height: number;
 }
 
-const NODE_W = 190;
-const NODE_H = 64;
-const GAP_X = 90;
-const GAP_Y = 28;
+/** Cells hold neuron orbs now: orb on top, name + status beneath. */
+const NODE_W = 150;
+const NODE_H = 98;
+const GAP_X = 70;
+const GAP_Y = 30;
 const PAD = 40;
+/** Orb center sits this far below the cell top; edges anchor to the orb rim. */
+export const ORB_CY = 30;
+export const ORB_R = 22;
+
+/** Deterministic wobble from ids — organic curves that never jiggle on reload. */
+function wobble(a: string, b: string): number {
+  let h = 0;
+  for (const c of a + b) h = (h * 31 + c.charCodeAt(0)) | 0;
+  return (h % 29) - 14;
+}
 
 /**
  * Ranks each node by how far it sits from a root, then stacks same-rank nodes
@@ -61,14 +72,15 @@ export function rankNodes(graph: Graph): Map<string, number> {
   return rank;
 }
 
-/** Cubic bezier that leaves the right edge and arrives at the left edge. */
+/** An organic dendrite: leaves one orb's rim, curves, arrives at the next. */
 function edgePath(from: LaidOutNode, to: LaidOutNode): string {
-  const x1 = from.x + from.width;
-  const y1 = from.y + from.height / 2;
-  const x2 = to.x;
-  const y2 = to.y + to.height / 2;
-  const dx = Math.max(40, (x2 - x1) / 2);
-  return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
+  const x1 = from.x + from.width / 2 + ORB_R;
+  const y1 = from.y + ORB_CY;
+  const x2 = to.x + to.width / 2 - ORB_R;
+  const y2 = to.y + ORB_CY;
+  const dx = Math.max(36, (x2 - x1) / 2);
+  const w = wobble(from.id, to.id);
+  return `M ${x1} ${y1} C ${x1 + dx} ${y1 + w}, ${x2 - dx} ${y2 - w}, ${x2} ${y2}`;
 }
 
 export function layoutGraph(graph: Graph): Layout {

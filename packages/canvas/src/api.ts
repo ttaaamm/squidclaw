@@ -27,6 +27,8 @@ export interface ExecutionSummary {
   /** Node names in order — enough to recognise the run at a glance. */
   shape: string;
   durationMs?: number;
+  /** Which flow this run belongs to, when the graph knows — the brain view pulses that neuron. */
+  flow?: string;
 }
 
 export interface ExecutionDetail extends ExecutionSummary {
@@ -51,6 +53,11 @@ const ms = (from?: string, to?: string) =>
   from && to ? Math.max(0, new Date(to).getTime() - new Date(from).getTime()) : undefined;
 
 export function summarize(execution: ExecutionRecord): ExecutionSummary {
+  // Imported/native dialect steps carry their flow's slug — the brain view
+  // uses it to pulse the right neuron while a run is alive.
+  const flow = execution.graph.nodes
+    .map((n) => n.params?.__flow as string | undefined)
+    .find(Boolean);
   return {
     id: execution.id,
     kind: execution.kind,
@@ -60,6 +67,7 @@ export function summarize(execution: ExecutionRecord): ExecutionSummary {
     finishedAt: execution.finishedAt,
     shape: execution.graph.nodes.map((n) => n.node).join(" → ") || "—",
     durationMs: ms(execution.startedAt, execution.finishedAt),
+    ...(flow ? { flow } : {}),
   };
 }
 
