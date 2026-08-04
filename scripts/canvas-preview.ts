@@ -6,9 +6,20 @@
  * Usage: npx tsx scripts/canvas-preview.ts   (then open http://localhost:4321)
  */
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { PAGE } from "../packages/canvas/src/page.js";
 import { layoutRadial } from "../packages/canvas/src/layout.js";
 import type { Graph } from "@squidclaw/kernel";
+
+const requireFrom = createRequire(import.meta.url);
+const threeBuild = dirname(requireFrom.resolve("three"));
+const ASSETS: Record<string, string> = {
+  "/assets/three.js": join(threeBuild, "three.module.min.js"),
+  "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
+  "/assets/orbit.js": join(threeBuild, "..", "examples", "jsm", "controls", "OrbitControls.js"),
+};
 
 const step = (id: string, n8nName: string) => ({ id, node: "n8n.step", params: { n8nName, __flow: "post" } });
 const GRAPH: Graph = {
@@ -84,17 +95,15 @@ const state = {
 const server = createServer((req, res) => {
   const url = req.url ?? "/";
   const json = (body: unknown) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); };
+  if (url.startsWith("/assets/")) {
+    const asset = ASSETS[url.split("?")[0]];
+    if (!asset) { res.statusCode = 404; return res.end("no asset"); }
+    res.setHeader("content-type", "text/javascript");
+    return res.end(readFileSync(asset));
+  }
   if (url === "/" || url.startsWith("/?")) {
+    // The page handles ?static itself: no SSE, render 45 frames, stop.
     res.setHeader("content-type", "text/html");
-    // ?static strips the infinite loops (SSE + ambient animation) so a
-    // headless screenshot can actually finish loading.
-    if (url.includes("static")) {
-      let html = PAGE
-        .replace("const events = new EventSource('/api/events');", "const events = { set onmessage(v) {} };")
-        .replace("(function ambient() {", "(function ambient() { if (1) { const c = $('#bg'); void c; } return;");
-      if (url.includes("run")) html = html.replace("load();", "load().then(() => openRun('run-1'));");
-      return res.end(html);
-    }
     return res.end(PAGE);
   }
   if (url === "/api/state") return json(state);

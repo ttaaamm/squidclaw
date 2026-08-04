@@ -1,15 +1,16 @@
 /**
- * The window into the agent's mind — drawn as the mind it is.
+ * The window into the agent's mind — now a 3D brain you can hold.
  *
- * A neural canvas: the agent is a bright core, every workflow a neuron
- * wired to it by organic dendrites, and a neuron PULSES while its flow is
- * running (live over SSE — real activity, not decoration). Clicking a
- * neuron dives into its inner network: the steps, also neurons, with
- * signals traveling the synapses that actually fired.
+ * One WebGL scene (three.js, self-hosted): the agent a burning core, every
+ * workflow a neuron floating around it in space, dendrites curving between
+ * them. Grab and ROTATE the whole brain, zoom from any side; glide close to
+ * a neuron and its inner network fades in around it — steps as smaller
+ * neurons, synapses that fired carrying moving signals. Nothing navigates
+ * away: details open as a glass overlay on the same page.
  *
- * Still one self-contained page — no bundler, no framework, no build step.
- * Hand-drawn SVG + one ambient <canvas>, shipped from the same Node process
- * the agent already runs in.
+ * Live over SSE: a running flow pulses at every zoom level, and inside a
+ * zoomed neuron the frontier step — parents done, no record yet — burns
+ * amber as "firing right now".
  */
 export const PAGE = String.raw`<!doctype html>
 <html lang="en">
@@ -17,49 +18,52 @@ export const PAGE = String.raw`<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SquidClaw — the mind</title>
+<script type="importmap">{"imports":{"three":"/assets/three.js"}}</script>
 <style>
   :root {
-    --bg0:#03060e; --bg1:#081226; --bg2:#0b1a33;
-    --glass:rgba(9,19,38,.62); --glass2:rgba(12,24,46,.5); --line:rgba(110,190,255,.14);
-    --ink:#d9e9ff; --dim:#6e87a8; --accent:#4fc3ff; --amber:#ffb35c;
-    --ok:#39e6b0; --err:#ff5c7a; --habit:#ffb35c;
+    --glass:rgba(9,19,38,.66); --glass2:rgba(12,24,46,.55); --line:rgba(110,190,255,.16);
+    --ink:#d9e9ff; --dim:#6e87a8; --accent:#4fc3ff; --amber:#ffb35c; --err:#ff5c7a; --ok:#39e6b0;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   }
   * { box-sizing:border-box; }
-  html, body { height:100%; }
-  body { margin:0; color:var(--ink);
-    background:radial-gradient(1200px 700px at 30% 20%, var(--bg2), transparent 60%),
-               radial-gradient(900px 600px at 75% 70%, #0a1730, transparent 55%),
-               linear-gradient(160deg, var(--bg1), var(--bg0) 70%);
-    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    overflow:hidden; }
-  #bg { position:fixed; inset:0; z-index:0; pointer-events:none; }
-  header { position:relative; z-index:3; display:flex; align-items:baseline; gap:16px;
-    padding:14px 20px; border-bottom:1px solid var(--line);
-    background:var(--glass); backdrop-filter:blur(10px); }
-  h1 { font-size:15px; margin:0; letter-spacing:.02em;
-    text-shadow:0 0 18px rgba(79,195,255,.55); }
+  html, body { height:100%; margin:0; overflow:hidden; background:#03060e; color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  #scene { position:fixed; inset:0; }
+  #labels { position:fixed; inset:0; pointer-events:none; z-index:2; }
+  .lbl { position:absolute; transform:translate(-50%,0); text-align:center; white-space:nowrap;
+    font:11.5px var(--mono); color:var(--ink); text-shadow:0 0 8px rgba(3,6,14,.9); }
+  .lbl small { display:block; color:var(--dim); font-size:9.5px; }
+  .lbl.core { font-size:13px; letter-spacing:.08em; }
+
+  header { position:fixed; top:0; left:0; right:0; z-index:5; display:flex; align-items:center; gap:12px;
+    padding:12px 16px; background:linear-gradient(rgba(3,6,14,.75), transparent); }
+  h1 { font-size:15px; margin:0; text-shadow:0 0 18px rgba(79,195,255,.6); }
   h1 span { color:var(--dim); font-weight:400; text-shadow:none; }
   .pills { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
   .pill { font:11px/1 var(--mono); padding:6px 9px; border:1px solid var(--line);
-    border-radius:99px; color:var(--dim); white-space:nowrap; background:var(--glass2); }
-  .pill b { color:var(--ink); font-weight:600; }
-  main { position:relative; z-index:2; display:grid; grid-template-columns:300px 1fr;
-    height:calc(100vh - 53px); }
-  @media (max-width:860px) { main { grid-template-columns:1fr; } aside { display:none; } }
-  aside { border-right:1px solid var(--line); overflow-y:auto;
-    background:var(--glass); backdrop-filter:blur(10px); }
-  section.detail { overflow-y:auto; padding:20px; }
+    border-radius:99px; color:var(--dim); background:var(--glass2); backdrop-filter:blur(8px); }
+  .pill b { color:var(--ink); }
+  .live-pill { display:inline-flex; align-items:center; gap:6px; }
+  .live-pill .dot { width:7px; height:7px; border-radius:99px; background:var(--ok); animation:pulse 2s infinite; }
+
+  #menu-btn { z-index:6; font:12px var(--mono); color:var(--accent); background:var(--glass);
+    border:1px solid var(--line); border-radius:8px; padding:7px 11px; cursor:pointer; backdrop-filter:blur(8px); }
+  #home-btn { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:5;
+    font:12px var(--mono); color:var(--accent); background:var(--glass); border:1px solid var(--line);
+    border-radius:99px; padding:8px 16px; cursor:pointer; backdrop-filter:blur(8px); display:none; }
+  #hint { position:fixed; bottom:16px; right:18px; z-index:4; font:10.5px var(--mono); color:var(--dim); text-align:right; }
+
+  #side { position:fixed; top:53px; left:0; bottom:0; width:300px; z-index:5; overflow-y:auto;
+    background:var(--glass); backdrop-filter:blur(12px); border-right:1px solid var(--line);
+    transform:translateX(-100%); transition:transform .25s ease; }
+  #side.open { transform:none; }
   .group { border-bottom:1px solid var(--line); }
-  .group > h2 { font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim);
-    margin:0; padding:12px 16px 6px; }
+  .group > h2 { font-size:10.5px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); margin:0; padding:12px 16px 6px; }
   .row { display:block; width:100%; text-align:left; background:none; border:0; color:inherit;
     padding:9px 16px; cursor:pointer; border-left:2px solid transparent; font:inherit; }
   .row:hover { background:rgba(79,195,255,.07); }
-  .row[aria-current="true"] { border-left-color:var(--accent); background:rgba(79,195,255,.1); }
   .row .top { display:flex; gap:8px; align-items:center; }
-  .row .shape { font:11px/1.4 var(--mono); color:var(--dim); margin-top:3px;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .row .shape { font:11px/1.4 var(--mono); color:var(--dim); margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .dot { width:7px; height:7px; border-radius:99px; flex:none; }
   .ok { background:var(--ok); box-shadow:0 0 8px rgba(57,230,176,.7); }
   .error { background:var(--err); box-shadow:0 0 8px rgba(255,92,122,.7); }
@@ -68,68 +72,40 @@ export const PAGE = String.raw`<!doctype html>
   .kind.flow { color:var(--accent); border-color:rgba(79,195,255,.4); }
   .when { margin-left:auto; font:10px/1 var(--mono); color:var(--dim); }
   .empty { padding:14px 16px; color:var(--dim); font-size:13px; }
-  .card { border:1px solid var(--line); border-radius:12px; background:var(--glass);
-    backdrop-filter:blur(8px); padding:14px 16px; margin-bottom:14px; }
+
+  #inspector { position:fixed; top:53px; right:0; bottom:0; width:min(430px, 92vw); z-index:5; overflow-y:auto;
+    background:var(--glass); backdrop-filter:blur(12px); border-left:1px solid var(--line);
+    padding:16px; transform:translateX(100%); transition:transform .25s ease; }
+  #inspector.open { transform:none; }
+  .card { border:1px solid var(--line); border-radius:12px; background:var(--glass2); padding:13px 15px; margin-bottom:12px; }
   .card h3 { margin:0 0 4px; font-size:13px; }
   .card p { margin:0; color:var(--dim); font-size:12.5px; }
-  .canvas-wrap { border:1px solid var(--line); border-radius:12px; background:rgba(5,10,22,.5);
-    overflow:hidden; margin-bottom:16px; display:flex; justify-content:center; max-height:74vh; }
-  .canvas-wrap svg { width:100%; height:auto; max-height:74vh; margin:auto;
-    animation:dive .55s cubic-bezier(.2,.8,.3,1); }
-  @keyframes dive { from { transform:scale(.45); opacity:0; } }
-  svg { display:block; }
-  .back { display:inline-block; margin-bottom:12px; color:var(--accent); cursor:pointer;
-    font:12px var(--mono); background:none; border:0; padding:0; }
-  .back:hover { text-shadow:0 0 10px rgba(79,195,255,.7); }
-
-  /* ——— neurons ——— */
-  .n { cursor:pointer; }
-  .n .halo { opacity:.5; }
-  .n .core { fill:url(#gradIdle); }
-  .n[data-status="ok"] .core { fill:url(#gradOk); }
-  .n[data-status="error"] .core { fill:url(#gradErr); }
-  .n[data-status="skipped"] .core { fill:url(#gradDim); opacity:.45; }
-  .n[data-status="skipped"] .halo { opacity:.1; }
-  .n[data-status="running"] .core, .n.pulsing .core { fill:url(#gradRun); animation:neuron 1.5s ease-in-out infinite; transform-box:fill-box; transform-origin:center; }
-  .n[data-status="running"] .halo, .n.pulsing .halo { animation:haloPulse 1.5s ease-in-out infinite; }
-  .n:hover .halo, .n.sel .halo { opacity:.95; }
-  .n text { fill:var(--ink); font:11.5px var(--mono); text-anchor:middle; }
-  .n text.sub { fill:var(--dim); font-size:9.5px; }
-  .n.dim text { fill:var(--dim); }
-  .n.dim .core { opacity:.5; }
-  path.edge { fill:none; stroke:rgba(110,190,255,.18); stroke-width:1.5; }
-  path.edge.fired { stroke:rgba(79,195,255,.55); stroke-dasharray:5 9; animation:signal 1.1s linear infinite; }
-  path.edge.err { stroke:rgba(255,92,122,.5); }
-  path.edge.live { stroke:rgba(255,179,92,.6); stroke-dasharray:4 10; animation:signal .8s linear infinite; }
-  .satellite { fill:var(--amber); opacity:.85; }
-  .corelabel { fill:var(--ink); font:12.5px var(--mono); text-anchor:middle;
-    letter-spacing:.06em; }
-
-  pre { margin:0; font:11.5px/1.55 var(--mono); white-space:pre-wrap; word-break:break-word;
-    color:var(--ink); max-height:320px; overflow:auto; }
+  pre { margin:0; font:11.5px/1.55 var(--mono); white-space:pre-wrap; word-break:break-word; max-height:280px; overflow:auto; }
   .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; font:12px var(--mono); color:var(--dim); }
   .kv b { color:var(--ink); font-weight:500; }
-  .err { color:var(--err); }
-  .hint { color:var(--dim); font-size:12.5px; }
-  .live-pill { display:inline-flex; align-items:center; gap:6px; }
-  .live-pill .dot { background:var(--ok); animation:pulse 2s infinite; }
+  .err-text { color:var(--err); }
+  .x { float:right; color:var(--dim); cursor:pointer; font:14px var(--mono); background:none; border:0; }
   @keyframes pulse { 50% { opacity:.35 } }
-  @keyframes neuron { 50% { transform:scale(1.18); } }
-  @keyframes haloPulse { 50% { opacity:.95; } }
-  @keyframes signal { to { stroke-dashoffset:-28; } }
 </style>
 </head>
 <body>
-<canvas id="bg"></canvas>
+<canvas id="scene"></canvas>
+<div id="labels"></div>
 <header>
+  <button id="menu-btn">☰</button>
   <h1>🐙 SquidClaw <span>— the mind</span></h1>
   <div class="pills" id="pills"></div>
 </header>
-<main>
-  <aside id="side"></aside>
-  <section class="detail" id="detail"></section>
-</main>
-<script>
+<aside id="side"></aside>
+<section id="inspector"></section>
+<button id="home-btn">⟵ whole brain</button>
+<div id="hint">drag to rotate · scroll to zoom · right-drag to pan<br>click a neuron to enter it</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from '/assets/orbit.js';
+
+const STATIC = location.search.includes('static');
 const $ = (s, r=document) => r.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ago = (iso) => {
@@ -140,33 +116,313 @@ const ago = (iso) => {
   return Math.floor(s/86400) + 'd ago';
 };
 const dur = (ms) => ms == null ? '' : ms < 1000 ? ms + 'ms' : (ms/1000).toFixed(1) + 's';
+const hashOf = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); };
 
-let state = null, runs = [], selected = null;
-let showRoutine = false;
-let view = 'brain'; // 'brain' | 'run' | 'habit'
+/* ————— the stage ————— */
+const renderer = new THREE.WebGLRenderer({ canvas: $('#scene'), antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x03060e);
+scene.fog = new THREE.FogExp2(0x03060e, 0.0016);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 4000);
+camera.position.set(0, 34, 165);
 
-const isSignificant = (e) => e.kind === "flow";
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 8;
+controls.maxDistance = 480;
+controls.autoRotate = !STATIC;
+controls.autoRotateSpeed = 0.5;
+let idleTimer;
+controls.addEventListener('start', () => {
+  controls.autoRotate = false;
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { controls.autoRotate = !STATIC; }, 20000);
+});
 
-/* ——— shared SVG defs: the glow language every view speaks ——— */
-function defs() {
-  return '<defs>' +
-    '<radialGradient id="gradOk"><stop offset="0%" stop-color="#eaffff"/><stop offset="45%" stop-color="#7fd8ff"/><stop offset="100%" stop-color="#1668a8"/></radialGradient>' +
-    '<radialGradient id="gradRun"><stop offset="0%" stop-color="#fff6e8"/><stop offset="45%" stop-color="#ffcf8e"/><stop offset="100%" stop-color="#b06a1e"/></radialGradient>' +
-    '<radialGradient id="gradErr"><stop offset="0%" stop-color="#ffe8ee"/><stop offset="45%" stop-color="#ff8aa5"/><stop offset="100%" stop-color="#8f1f38"/></radialGradient>' +
-    '<radialGradient id="gradDim"><stop offset="0%" stop-color="#9fb4cf"/><stop offset="100%" stop-color="#2a3a55"/></radialGradient>' +
-    '<radialGradient id="gradIdle"><stop offset="0%" stop-color="#d8f2ff"/><stop offset="45%" stop-color="#5fb9e8"/><stop offset="100%" stop-color="#134e7f"/></radialGradient>' +
-    '<radialGradient id="gradCore"><stop offset="0%" stop-color="#ffffff"/><stop offset="35%" stop-color="#9fe2ff"/><stop offset="100%" stop-color="#1a5a94"/></radialGradient>' +
-    '<radialGradient id="gradHalo"><stop offset="0%" stop-color="rgba(79,195,255,.5)"/><stop offset="100%" stop-color="rgba(79,195,255,0)"/></radialGradient>' +
-    '<radialGradient id="gradHaloAmber"><stop offset="0%" stop-color="rgba(255,179,92,.5)"/><stop offset="100%" stop-color="rgba(255,179,92,0)"/></radialGradient>' +
-    '</defs>';
+function resize() {
+  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+}
+resize(); addEventListener('resize', resize);
+
+/* ————— glow language: procedural sprite textures ————— */
+function glowTexture(inner, outer) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, inner); grad.addColorStop(0.35, outer); grad.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const TEX = {
+  cyan: glowTexture('rgba(255,255,255,1)', 'rgba(79,195,255,.85)'),
+  amber: glowTexture('rgba(255,250,240,1)', 'rgba(255,179,92,.9)'),
+  red: glowTexture('rgba(255,240,244,1)', 'rgba(255,92,122,.9)'),
+  dim: glowTexture('rgba(180,200,225,.9)', 'rgba(70,95,130,.6)'),
+  halo: glowTexture('rgba(79,195,255,.35)', 'rgba(79,195,255,.12)'),
+  haloAmber: glowTexture('rgba(255,179,92,.4)', 'rgba(255,179,92,.14)'),
+};
+function sprite(tex, size, opacity) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: opacity == null ? 1 : opacity,
+  }));
+  s.scale.setScalar(size);
+  return s;
 }
 
-async function load() {
-  [state, runs] = await Promise.all([
-    fetch('/api/state').then(r => r.json()),
-    fetch('/api/executions').then(r => r.json()),
-  ]);
-  renderPills(); renderSide(); if (view === 'brain') renderBrain();
+/* ————— ambient space ————— */
+const ambient = new THREE.Group(); scene.add(ambient);
+function starField(count, color, size, spread) {
+  const pos = new Float32Array(count * 3);
+  for (let i = 0; i < count * 3; i++) pos[i] = (Math.random() - 0.5) * spread;
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return new THREE.Points(geo, new THREE.PointsMaterial({
+    color, size, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  }));
+}
+ambient.add(starField(500, 0x4fc3ff, 1.1, 620));
+ambient.add(starField(180, 0xffb35c, 1.3, 620));
+
+/* ————— the brain ————— */
+const brain = new THREE.Group(); scene.add(brain);
+const core = new THREE.Group();
+core.add(sprite(TEX.cyan, 30), sprite(TEX.halo, 95, .9), sprite(TEX.halo, 55, .9));
+brain.add(core);
+
+let state = null, runs = [];
+const neurons = new Map(); // name -> {group, coreSprite, halo, pos, flow, cluster?, statuses?}
+let focused = null;        // name of the neuron the camera lives inside
+const labels = [];         // {el, obj, minDist, maxDist}
+
+function label(text, sub, obj, cls, minDist, maxDist) {
+  const el = document.createElement('div');
+  el.className = 'lbl' + (cls ? ' ' + cls : '');
+  el.innerHTML = esc(text) + (sub ? '<small>' + esc(sub) + '</small>' : '');
+  $('#labels').appendChild(el);
+  const entry = { el, obj, minDist: minDist || 0, maxDist: maxDist || 1e9 };
+  labels.push(entry);
+  return entry;
+}
+
+/** Neurons breathe on a fibonacci sphere — every side of the brain is a side. */
+function neuronPosition(i, n, name) {
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  const y = n === 1 ? 0 : 1 - (i / (n - 1)) * 2;
+  const r = Math.sqrt(Math.max(0, 1 - y * y));
+  const theta = golden * i + (hashOf(name) % 100) / 160;
+  const R = 62 + (hashOf(name + 'r') % 22);
+  return new THREE.Vector3(Math.cos(theta) * r * R, y * R * 0.8, Math.sin(theta) * r * R);
+}
+
+function dendrite(from, to, name) {
+  const mid = from.clone().lerp(to, 0.5);
+  const perp = new THREE.Vector3().crossVectors(to.clone().sub(from), new THREE.Vector3(0, 1, 0.3)).normalize();
+  mid.add(perp.multiplyScalar(((hashOf(name) % 30) - 15)));
+  const curve = new THREE.QuadraticBezierCurve3(from, mid, to);
+  const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(42));
+  const mat = new THREE.LineBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending });
+  return { line: new THREE.Line(geo, mat), curve, mat };
+}
+
+function buildBrain() {
+  const flows = state.habits.concat(state.drafts.map(d => Object.assign({}, d, { draft: true })));
+  flows.forEach((f, i) => {
+    if (neurons.has(f.name)) return;
+    const pos = neuronPosition(i, flows.length, f.name);
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    const coreSprite = sprite(f.draft ? TEX.dim : TEX.cyan, 10);
+    const halo = sprite(TEX.halo, 30, .8);
+    coreSprite.userData = { kind: 'neuron', name: f.name };
+    group.add(coreSprite, halo);
+    brain.add(group);
+    const d = dendrite(new THREE.Vector3(0, 0, 0), pos, f.name);
+    brain.add(d.line);
+    const signal = sprite(TEX.amber, 3.2, 0); brain.add(signal);
+    neurons.set(f.name, { flow: f, group, coreSprite, halo, pos, dendrite: d, signal, cluster: null });
+    label(f.name, f.draft ? 'forming' : f.runs + ' runs', group, '', 0, 1e9);
+  });
+}
+
+/* ————— inner networks: zoom into a neuron, see its synapses ————— */
+async function loadCluster(name) {
+  const n = neurons.get(name);
+  if (!n || n.cluster) return;
+  const h = await fetch('/api/habits/' + encodeURIComponent(name)).then(r => r.json());
+  if (h.error) return;
+  const cluster = new THREE.Group();
+  cluster.position.copy(n.pos);
+  // The radial 2D layout maps onto a disc facing the core — plus depth jitter,
+  // so the inner network is a small galaxy, not a flat sticker.
+  const L = h.layout;
+  const cx = L.width / 2, cy = L.height / 2;
+  const scale = 22 / Math.max(L.width, L.height);
+  const normal = n.pos.clone().normalize();
+  const right = new THREE.Vector3().crossVectors(normal, new THREE.Vector3(0, 1, 0)).normalize();
+  if (!right.lengthSq()) right.set(1, 0, 0);
+  const up = new THREE.Vector3().crossVectors(right, normal).normalize();
+  const stepObjs = new Map();
+  for (const node of L.nodes) {
+    const info = h.nodes.find(x => x.id === node.id) || {};
+    const lx = (node.x + node.width / 2 - cx) * scale;
+    const ly = (node.y + 30 - cy) * scale;
+    const lz = ((hashOf(node.id) % 14) - 7) * 0.45;
+    const p = right.clone().multiplyScalar(lx).add(up.clone().multiplyScalar(-ly)).add(normal.clone().multiplyScalar(lz));
+    const s = sprite(TEX.cyan, 2.6);
+    s.position.copy(p);
+    s.userData = { kind: 'step', flow: name, id: node.id };
+    const hl = sprite(TEX.halo, 7, .7); hl.position.copy(p);
+    cluster.add(s, hl);
+    const stepName = (info.params && info.params.n8nName) ? info.params.n8nName : node.node;
+    const lbl = label(stepName, '', { getWorldPosition: (v) => v.copy(p).add(n.pos), isStep: true }, '', 0, 46);
+    lbl.el.style.fontSize = '9.5px';
+    stepObjs.set(node.id, { sprite: s, halo: hl, label: lbl, pos: p, node: info });
+  }
+  const edgeObjs = [];
+  for (const e of L.edges) {
+    const a = stepObjs.get(e.from), b = stepObjs.get(e.to);
+    if (!a || !b) continue;
+    const mid = a.pos.clone().lerp(b.pos, 0.5).add(normal.clone().multiplyScalar(((hashOf(e.from + e.to) % 10) - 5) * 0.2));
+    const curve = new THREE.QuadraticBezierCurve3(a.pos, mid, b.pos);
+    const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(20));
+    const mat = new THREE.LineBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+    const line = new THREE.Line(geo, mat);
+    cluster.add(line);
+    edgeObjs.push({ from: e.from, to: e.to, mat, curve });
+  }
+  cluster.visible = false;
+  brain.add(cluster);
+  n.cluster = { group: cluster, steps: stepObjs, edges: edgeObjs, meta: h };
+  applyStatuses(name);
+}
+
+/** Latest run of this flow paints the inner network — live if it's running. */
+async function applyStatuses(name) {
+  const n = neurons.get(name);
+  if (!n || !n.cluster) return;
+  const run = runs.find(r => r.flow === name);
+  if (!run) return;
+  const e = await fetch('/api/executions/' + run.id).then(r => r.json());
+  if (e.error) return;
+  const byId = {};
+  for (const node of e.nodes) byId[node.id] = node;
+  if (e.status === 'running') {
+    for (const node of e.nodes) {
+      if (node.status) continue;
+      const parents = e.layout.edges.filter(x => x.to === node.id).map(x => byId[x.from]);
+      if (!parents.length || parents.some(p => p && p.status === 'ok')) byId[node.id] = Object.assign({}, node, { status: 'running' });
+    }
+  }
+  for (const [id, obj] of n.cluster.steps) {
+    const info = byId[id] || {};
+    obj.node = info;
+    const st = info.status;
+    obj.sprite.material.map = st === 'error' ? TEX.red : st === 'running' ? TEX.amber : st === 'skipped' ? TEX.dim : TEX.cyan;
+    obj.sprite.material.opacity = st === 'skipped' ? .45 : 1;
+    obj.pulsing = st === 'running';
+    obj.label.el.querySelector('small')?.remove();
+    if (st) obj.label.el.innerHTML = esc(obj.label.el.textContent) + '<small>' + esc(st + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '')) + '</small>';
+  }
+  for (const eo of n.cluster.edges) {
+    const a = byId[eo.from] || {}, b = byId[eo.to] || {};
+    const firedEdge = (a.status === 'ok') && (b.status === 'ok' || b.status === 'error' || b.status === 'running');
+    eo.mat.color.set(b.status === 'error' ? 0xff5c7a : firedEdge ? 0x7fd8ff : 0x4fa8e8);
+    eo.mat.opacity = firedEdge ? 0.7 : 0.22;
+  }
+}
+
+/* ————— flight: click a neuron, glide inside it ————— */
+let flight = null;
+function flyTo(targetPos, dist, name) {
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  flight = {
+    t: 0,
+    fromT: controls.target.clone(), toT: targetPos.clone(),
+    fromC: camera.position.clone(), toC: targetPos.clone().add(dir.multiplyScalar(dist)),
+  };
+  focused = name;
+  $('#home-btn').style.display = name ? 'block' : 'none';
+  if (name) loadCluster(name).then(() => applyStatuses(name));
+}
+$('#home-btn').onclick = () => { closeInspector(); flyTo(new THREE.Vector3(0, 0, 0), 165, null); };
+
+/* ————— picking ————— */
+const ray = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (ev) => { downAt = [ev.clientX, ev.clientY]; });
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!downAt || Math.hypot(ev.clientX - downAt[0], ev.clientY - downAt[1]) > 6) return; // it was a drag
+  mouse.x = (ev.clientX / innerWidth) * 2 - 1;
+  mouse.y = -(ev.clientY / innerHeight) * 2 + 1;
+  ray.setFromCamera(mouse, camera);
+  const hits = ray.intersectObjects(brain.children, true).filter(h => h.object.userData && h.object.userData.kind);
+  const hit = hits[0];
+  if (!hit) { closeInspector(); return; }
+  const ud = hit.object.userData;
+  if (ud.kind === 'neuron') {
+    const n = neurons.get(ud.name);
+    flyTo(n.pos, 30, ud.name);
+    showFlow(n.flow);
+  } else if (ud.kind === 'step') {
+    showStep(ud.flow, ud.id);
+  }
+});
+
+/* ————— inspector: glass, same page, no navigation ————— */
+function openInspector(html) { $('#inspector').innerHTML = '<button class="x" id="insp-x">✕</button>' + html; $('#inspector').classList.add('open'); $('#insp-x').onclick = closeInspector; }
+function closeInspector() { $('#inspector').classList.remove('open'); }
+function showFlow(f) {
+  openInspector(
+    '<div class="card"><h3>' + esc(f.name) + '</h3><p>' + esc(f.description || '') + '</p></div>' +
+    '<div class="card"><div class="kv">' +
+    '<span>runs</span><b>' + (f.runs || 0) + '</b>' +
+    '<span>asks for</span><b>' + ((f.params || []).map(p => p && p.name ? p.name : p).join(', ') || '—') + '</b>' +
+    '<span>status</span><b>' + (f.draft ? 'draft' : 'promoted') + '</b></div></div>' +
+    '<p style="color:var(--dim);font-size:12px">Zoom closer — the neuron opens. Click a step inside for its data.</p>');
+}
+function showStep(flow, id) {
+  const n = neurons.get(flow);
+  const obj = n && n.cluster && n.cluster.steps.get(id);
+  if (!obj) return;
+  const info = obj.node || {};
+  const name = (info.params && info.params.n8nName) ? info.params.n8nName : (info.node || id);
+  openInspector(
+    '<div class="card"><h3>' + esc(name) + '</h3>' +
+    (info.error ? '<p class="err-text">' + esc(info.error) + '</p>' : '<p>' + esc(info.status || 'not run yet') + '</p>') + '</div>' +
+    '<div class="card"><h3>Params</h3><pre>' + esc(JSON.stringify(info.params || {}, null, 2)) + '</pre></div>' +
+    (info.input && info.input.length ? '<div class="card"><h3>In</h3><pre>' + esc(JSON.stringify(info.input, null, 2)) + '</pre></div>' : '') +
+    '<div class="card"><h3>Out</h3><pre>' + esc(info.output ? JSON.stringify(info.output, null, 2) : '—') + '</pre></div>');
+}
+
+/* ————— sidebar (overlay, toggleable) ————— */
+$('#menu-btn').onclick = () => $('#side').classList.toggle('open');
+const isSignificant = (e) => e.kind === 'flow';
+let showRoutine = false;
+function renderSide() {
+  const visible = showRoutine ? runs : runs.filter(isSignificant);
+  const hidden = runs.length - (showRoutine ? runs.length : visible.length);
+  const runRows = visible.map(e =>
+    '<button class="row" data-run="' + e.id + '" data-flow="' + esc(e.flow || '') + '"><div class="top">' +
+    '<span class="dot ' + e.status + '"></span><span class="kind ' + e.kind + '">' + (e.kind === 'flow' ? (e.flow || 'squidflow') : e.kind) + '</span>' +
+    '<span class="when">' + ago(e.startedAt) + (e.durationMs != null ? ' · ' + dur(e.durationMs) : '') + '</span></div>' +
+    '<div class="shape">' + esc(e.shape) + '</div></button>').join('');
+  const toggle = '<button class="row" id="routine-toggle" style="color:var(--dim);font-size:12px">' +
+    (showRoutine ? 'hide improvised runs' : (hidden > 0 ? 'show ' + hidden + ' improvised run' + (hidden === 1 ? '' : 's') + ' (its thinking)' : '')) + '</button>';
+  $('#side').innerHTML =
+    '<div class="group"><h2>SquidFlow runs</h2>' +
+    (runRows || '<p class="empty">No runs yet.</p>') + ((showRoutine || hidden > 0) ? toggle : '') + '</div>';
+  $('#side').querySelectorAll('[data-run]').forEach(b => b.onclick = () => {
+    const flow = b.dataset.flow;
+    if (flow && neurons.has(flow)) { const n = neurons.get(flow); flyTo(n.pos, 30, flow); showFlow(n.flow); }
+    $('#side').classList.remove('open');
+  });
+  const t = $('#routine-toggle');
+  if (t) t.onclick = () => { showRoutine = !showRoutine; renderSide(); };
 }
 
 function renderPills() {
@@ -174,289 +430,110 @@ function renderPills() {
     '<span class="pill live-pill"><span class="dot"></span>live</span>',
     '<span class="pill">thinking via <b>' + esc(state.mind.via) + '</b></span>',
     '<span class="pill"><b>' + state.mind.tools + '</b> tools</span>',
-    '<span class="pill"><b>' + state.counts.habits + '</b> habits</span>',
-    '<span class="pill"><b>' + state.counts.reflexes + '</b> reflexes armed</span>',
+    '<span class="pill"><b>' + state.counts.habits + '</b> neurons</span>',
   ].join('');
 }
 
-function group(title, inner) {
-  return '<div class="group"><h2>' + title + '</h2>' + inner + '</div>';
-}
-
-function renderSide() {
-  const habitRows = state.habits.map(h =>
-    '<button class="row" data-habit="' + esc(h.name) + '"><div class="top">' +
-    '<span class="kind flow">neuron</span><b>' + esc(h.name) + '</b>' +
-    '<span class="when">' + h.runs + ' runs</span></div>' +
-    '<div class="shape">' + esc(h.description) + '</div></button>').join('');
-
-  const draftRows = state.drafts.map(h =>
-    '<button class="row" data-habit="' + esc(h.name) + '"><div class="top">' +
-    '<span class="kind">draft</span><b>' + esc(h.name) + '</b></div>' +
-    '<div class="shape">awaiting /promote</div></button>').join('');
-
-  const reflexRows = state.reflexes.map(r =>
-    '<div class="row"><div class="top"><span class="dot ' + (r.lastStatus || 'running') + '"></span>' +
-    '<b>' + esc(r.name) + '</b><span class="when">' + esc(r.cron || 'POST /hooks/' + r.webhook) + '</span></div>' +
-    '<div class="shape">fires ' + esc(r.flow) + '</div></div>').join('');
-
-  const visible = showRoutine ? runs : runs.filter(isSignificant);
-  const hidden = runs.length - (showRoutine ? runs.length : visible.length);
-  const runRows = visible.map(e =>
-    '<button class="row" data-run="' + e.id + '" aria-current="' + (e.id === selected) + '"><div class="top">' +
-    '<span class="dot ' + e.status + '"></span><span class="kind ' + e.kind + '">' + (e.kind === 'flow' ? (e.flow || 'squidflow') : e.kind) + '</span>' +
-    '<span class="when">' + ago(e.startedAt) + (e.durationMs != null ? ' · ' + dur(e.durationMs) : '') + '</span></div>' +
-    '<div class="shape">' + esc(e.shape) + '</div></button>').join('');
-
-  const routineToggle =
-    '<button class="row" id="routine-toggle" style="color:var(--dim);font-size:12px">' +
-    (showRoutine ? 'hide improvised runs' : (hidden > 0 ? 'show ' + hidden + ' improvised run' + (hidden === 1 ? '' : 's') + ' (its thinking)' : '')) +
-    '</button>';
-
-  $('#side').innerHTML =
-    '<button class="row" id="to-brain" style="color:var(--accent)">◉ the brain</button>' +
-    (habitRows ? group('Neurons — flows it runs without thinking', habitRows) : '') +
-    (draftRows ? group('Forming — drafts', draftRows) : '') +
-    (reflexRows ? group('Reflexes', reflexRows) : '') +
-    group('SquidFlow runs',
-      (runRows || '<p class="empty">No SquidFlow runs yet — when you /promote a habit, its runs land here.</p>') +
-      ((showRoutine || hidden > 0) ? routineToggle : ''));
-
-  $('#side').querySelectorAll('[data-run]').forEach(b =>
-    b.onclick = () => openRun(b.dataset.run));
-  $('#side').querySelectorAll('[data-habit]').forEach(b =>
-    b.onclick = () => openHabit(b.dataset.habit));
-  $('#to-brain').onclick = () => { view = 'brain'; selected = null; renderBrain(); renderSide(); };
-  const toggle = $('#routine-toggle');
-  if (toggle) toggle.onclick = () => { showRoutine = !showRoutine; renderSide(); };
-}
-
-/* ——— the brain: every workflow a neuron around the agent's core ——— */
-function hashOf(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h); }
-
-function renderBrain() {
-  view = 'brain';
-  const stage = $('#detail');
-  const W = Math.max(640, stage.clientWidth - 40);
-  const H = Math.max(480, window.innerHeight - 120);
-  const cx = W / 2, cy = H / 2 - 10;
-
-  const flows = state.habits.concat(state.drafts.map(d => Object.assign({}, d, { draft: true })));
+/* ————— live states ————— */
+function refreshNeuronStates() {
   const running = new Set(runs.filter(r => r.status === 'running' && r.flow).map(r => r.flow));
-  const anyRunning = runs.some(r => r.status === 'running');
   const lastByFlow = {};
   for (const r of runs) if (r.flow && !(r.flow in lastByFlow)) lastByFlow[r.flow] = r.status;
-
-  const R = Math.min(W, H) / 2 - 110;
-  const placed = flows.map((f, i) => {
-    const jitter = (hashOf(f.name) % 40) - 20;
-    const angle = -Math.PI / 2 + (i * 2 * Math.PI / Math.max(1, flows.length)) + jitter / 160;
-    const radius = R + ((hashOf(f.name + 'r') % 50) - 25);
-    return { f, x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle), angle };
-  });
-
-  const edges = placed.map(p => {
-    const w = (hashOf(p.f.name + 'w') % 60) - 30;
-    const mx = (cx + p.x) / 2 - Math.sin(p.angle) * w;
-    const my = (cy + p.y) / 2 + Math.cos(p.angle) * w;
-    const cls = running.has(p.f.name) ? 'edge live' : 'edge' + (lastByFlow[p.f.name] === 'error' ? ' err' : '');
-    return '<path class="' + cls + '" d="M ' + cx + ' ' + cy + ' Q ' + mx.toFixed(1) + ' ' + my.toFixed(1) + ', ' + p.x.toFixed(1) + ' ' + p.y.toFixed(1) + '"/>';
-  }).join('');
-
-  const neurons = placed.map(p => {
-    const isRunning = running.has(p.f.name);
-    const status = isRunning ? 'running' : (lastByFlow[p.f.name] === 'error' ? 'error' : (p.f.draft ? '' : 'ok'));
-    const halo = isRunning ? 'url(#gradHaloAmber)' : 'url(#gradHalo)';
-    return '<g class="n' + (p.f.draft ? ' dim' : '') + (isRunning ? ' pulsing' : '') + '" data-habit="' + esc(p.f.name) + '" data-status="' + status + '">' +
-      '<circle class="halo" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="42" fill="' + halo + '"/>' +
-      '<circle class="core" cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="17"/>' +
-      '<text x="' + p.x.toFixed(1) + '" y="' + (p.y + 38).toFixed(1) + '">' + esc(p.f.name) + '</text>' +
-      '<text class="sub" x="' + p.x.toFixed(1) + '" y="' + (p.y + 52).toFixed(1) + '">' +
-        (p.f.draft ? 'forming' : (isRunning ? 'firing…' : p.f.runs + ' runs')) + '</text></g>';
-  }).join('');
-
-  // Reflexes orbit the neuron they fire.
-  const sats = state.reflexes.map((r, i) => {
-    const host = placed.find(p => p.f.name === r.flow);
-    if (!host) return '';
-    const a = (i * 2.4) + hashOf(r.name) % 6;
-    return '<circle class="satellite" r="3.5" cx="' + (host.x + 30 * Math.cos(a)).toFixed(1) + '" cy="' + (host.y + 30 * Math.sin(a)).toFixed(1) + '"><title>' + esc(r.name) + '</title></circle>';
-  }).join('');
-
-  const core =
-    '<g class="n' + (anyRunning ? ' pulsing' : '') + '" id="core">' +
-    '<circle class="halo" cx="' + cx + '" cy="' + cy + '" r="86" fill="url(#gradHalo)"/>' +
-    '<circle class="halo" cx="' + cx + '" cy="' + cy + '" r="52" fill="url(#gradHalo)"/>' +
-    '<circle class="core" cx="' + cx + '" cy="' + cy + '" r="26" fill="url(#gradCore)"/>' +
-    '<text class="corelabel" x="' + cx + '" y="' + (cy + 54) + '">the mind</text></g>';
-
-  stage.innerHTML =
-    '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">' +
-    defs() + edges + sats + neurons + core + '</svg>' +
-    (flows.length ? '' : '<p class="hint">No flows yet — when habits crystallize and get promoted, they appear here as neurons.</p>');
-
-  stage.querySelectorAll('[data-habit]').forEach(g =>
-    g.onclick = () => openHabit(g.dataset.habit));
-}
-
-async function openHabit(name) {
-  const h = await fetch('/api/habits/' + encodeURIComponent(name)).then(r => r.json());
-  if (h.error) return;
-  view = 'habit';
-  $('#detail').innerHTML =
-    '<button class="back" id="back">← the brain</button>' +
-    '<div class="card"><h3>' + esc(h.name) + '</h3><p>' + esc(h.description) + '</p></div>' +
-    '<div class="canvas-wrap">' + svg(h.layout, h.nodes) + '</div>' +
-    '<div class="card"><div class="kv">' +
-    '<span>learned from</span><b>' + h.runs + ' runs</b>' +
-    '<span>asks for</span><b>' + (h.params.length ? esc(h.params.map(function (p) { return p && p.name ? p.name : p; }).join(', ')) : '—') + '</b>' +
-    '<span>status</span><b>' + esc(h.status) + '</b></div></div>' +
-    (h.triggers.length ? '<div class="card"><h3>What people said to ask for it</h3><pre>' +
-      esc(h.triggers.join('\n')) + '</pre></div>' : '');
-  $('#back').onclick = () => { renderBrain(); renderSide(); };
-  wireNodes(h.nodes);
-}
-
-async function openRun(id) {
-  selected = id;
-  const e = await fetch('/api/executions/' + id).then(r => r.json());
-  if (e.error) return;
-  view = 'run';
-  $('#detail').innerHTML =
-    '<button class="back" id="back">← the brain</button>' +
-    '<div class="card"><h3>' + (e.kind === 'flow' ? (e.flow ? esc(e.flow) + ' run' : 'SquidFlow run') : 'Improvised thought') + ' · ' +
-      '<span class="' + (e.status === 'error' ? 'err' : '') + '">' + e.status + '</span></h3>' +
-      '<p>' + esc(e.shape) + '</p></div>' +
-    '<div class="canvas-wrap">' + svg(e.layout, e.nodes, e.status) + '</div>' +
-    '<div class="card"><div class="kv">' +
-      '<span>started</span><b>' + new Date(e.startedAt).toLocaleString() + '</b>' +
-      '<span>took</span><b>' + (dur(e.durationMs) || '—') + '</b>' +
-      '<span>steps</span><b>' + e.steps + '</b></div></div>' +
-    '<div id="node-detail"><p class="hint">Click a neuron to see exactly what went in and what came out.</p></div>';
-  $('#back').onclick = () => { selected = null; renderBrain(); renderSide(); };
-  wireNodes(e.nodes);
-  renderSide();
-}
-
-/* ——— a run's inner network: each step a neuron, fired synapses animated ——— */
-function svg(L, nodes, runStatus) {
-  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
-  // A live run: the frontier — steps whose parents finished but that have no
-  // record yet — is what's firing RIGHT NOW. Show it pulsing.
-  if (runStatus === 'running') {
-    for (const n of L.nodes) {
-      const info = byId[n.id];
-      if (!info || info.status) continue;
-      const parents = L.edges.filter(e => e.to === n.id).map(e => byId[e.from]);
-      const ready = parents.length
-        ? parents.some(p => p && (p.status === 'ok' || p.status === 'running'))
-        : true;
-      if (ready) info.status = 'running';
-    }
+  for (const [name, n] of neurons) {
+    n.running = running.has(name);
+    n.coreSprite.material.map = n.running ? TEX.amber : lastByFlow[name] === 'error' ? TEX.red : (n.flow.draft ? TEX.dim : TEX.cyan);
+    n.halo.material.map = n.running ? TEX.haloAmber : TEX.halo;
+    n.dendrite.mat.color.set(n.running ? 0xffb35c : lastByFlow[name] === 'error' ? 0xff5c7a : 0x4fa8e8);
+    n.dendrite.mat.opacity = n.running ? 0.55 : 0.22;
+    if (n.running && n.cluster) applyStatuses(name);
   }
-  const fired = (id) => { const s = (byId[id] || {}).status; return s === 'ok' || s === 'error' || s === 'running'; };
-  const edges = L.edges.map(e => {
-    const cls = 'edge' +
-      (fired(e.from) && fired(e.to) ? ((byId[e.to] || {}).status === 'error' ? ' fired err' : ' fired') : '');
-    return '<path class="' + cls + '" d="' + e.path + '"/>';
-  }).join('');
-  const orbs = L.nodes.map(n => {
-    const info = byId[n.id] || {};
-    const imported = info.params && info.params.n8nName;
-    const name = imported ? String(info.params.n8nName) : n.node;
-    const label = name.length > 19 ? name.slice(0, 18) + '…' : name;
-    const sub = (info.status || 'not run') + (info.durationMs != null ? ' · ' + dur(info.durationMs) : '');
-    const ox = n.x + n.width / 2, oy = n.y + 30;
-    return '<g class="n" data-node="' + n.id + '" data-status="' + (info.status || '') + '">' +
-      '<circle class="halo" cx="' + ox + '" cy="' + oy + '" r="34" fill="url(#gradHalo)"/>' +
-      '<circle class="core" cx="' + ox + '" cy="' + oy + '" r="15"/>' +
-      '<text x="' + ox + '" y="' + (oy + 34) + '">' + esc(label) + '</text>' +
-      '<text class="sub" x="' + ox + '" y="' + (oy + 48) + '">' + esc(sub) + '</text></g>';
-  }).join('');
-  return '<svg width="' + Math.max(L.width, 320) + '" height="' + L.height + '" ' +
-    'viewBox="0 0 ' + L.width + ' ' + L.height + '">' + defs() + edges + orbs + '</svg>';
 }
 
-function wireNodes(nodes) {
-  const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
-  document.querySelectorAll('.n[data-node]').forEach(g => g.onclick = () => {
-    document.querySelectorAll('.n').forEach(x => x.classList.remove('sel'));
-    g.classList.add('sel');
-    const n = byId[g.dataset.node];
-    const box = $('#node-detail');
-    if (!n || !box) return;
-    box.innerHTML =
-      '<div class="card"><h3>' + esc(n.node) + '</h3>' +
-      (n.error ? '<p class="err">' + esc(n.error) + '</p>' : '') + '</div>' +
-      '<div class="card"><h3>Params</h3><pre>' + esc(JSON.stringify(n.params, null, 2)) + '</pre></div>' +
-      (n.input && n.input.length ? '<div class="card"><h3>In</h3><pre>' +
-        esc(JSON.stringify(n.input, null, 2)) + '</pre></div>' : '') +
-      '<div class="card"><h3>Out</h3><pre>' +
-        esc(n.output ? JSON.stringify(n.output, null, 2) : '—') + '</pre></div>';
-  });
-}
-
-/* ——— ambient: the space the mind floats in ——— */
-(function ambient() {
-  const cv = $('#bg'), ctx = cv.getContext('2d');
-  const WORDS = ['function','output','true','then','flow','habit','if','else','signal','recall'];
-  let parts = [], words = [];
-  function size() {
-    cv.width = innerWidth; cv.height = innerHeight;
-    parts = Array.from({length: Math.min(110, Math.floor(innerWidth / 12))}, () => ({
-      x: Math.random() * cv.width, y: Math.random() * cv.height,
-      vx: (Math.random() - .5) * .18, vy: (Math.random() - .5) * .18,
-      r: Math.random() * 1.8 + .6, amber: Math.random() < .28,
-    }));
-    words = WORDS.map(w => ({ w, x: Math.random() * cv.width, y: Math.random() * cv.height,
-      vy: -.06 - Math.random() * .06, o: .05 + Math.random() * .06 }));
+/* ————— the heartbeat ————— */
+const clock = new THREE.Clock();
+let frames = 0;
+function animate() {
+  const t = clock.getElapsedTime();
+  if (flight) {
+    flight.t = Math.min(1, flight.t + 0.022);
+    const k = flight.t < 0.5 ? 2 * flight.t * flight.t : 1 - Math.pow(-2 * flight.t + 2, 2) / 2;
+    controls.target.lerpVectors(flight.fromT, flight.toT, k);
+    camera.position.lerpVectors(flight.fromC, flight.toC, k);
+    if (flight.t >= 1) flight = null;
   }
-  size(); addEventListener('resize', size);
-  (function tick() {
-    ctx.clearRect(0, 0, cv.width, cv.height);
-    for (const p of parts) {
-      p.x = (p.x + p.vx + cv.width) % cv.width;
-      p.y = (p.y + p.vy + cv.height) % cv.height;
-    }
-    ctx.lineWidth = .5;
-    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
-      const a = parts[i], b = parts[j], dx = a.x - b.x, dy = a.y - b.y, d = dx*dx + dy*dy;
-      if (d < 10000) {
-        ctx.strokeStyle = 'rgba(90,170,240,' + (0.06 * (1 - d / 10000)).toFixed(3) + ')';
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  controls.update();
+  ambient.rotation.y = t * 0.004;
+
+  const camDist = (p) => camera.position.distanceTo(p);
+  for (const [name, n] of neurons) {
+    const pulse = n.running ? 1 + Math.sin(t * 5) * 0.22 : 1;
+    n.coreSprite.scale.setScalar(10 * pulse);
+    n.halo.scale.setScalar(30 * (n.running ? 1 + Math.sin(t * 5) * 0.12 : 1));
+    if (n.running) {
+      n.signal.material.opacity = 0.95;
+      n.signal.position.copy(n.dendrite.curve.getPoint((t * 0.45 + hashOf(name) % 10 / 10) % 1));
+    } else n.signal.material.opacity = 0;
+    // Semantic zoom: the inner network breathes in as you approach.
+    const d = camDist(n.group.position);
+    if (n.cluster) {
+      const near = Math.max(0, Math.min(1, (52 - d) / 22));
+      n.cluster.group.visible = near > 0.02;
+      n.cluster.group.children.forEach(ch => { if (ch.material) ch.material.opacity = Math.min(1, near) * (ch.userData.kind ? 1 : 0.6); });
+      const shrink = 1 - near * 0.75;
+      n.coreSprite.scale.setScalar(10 * pulse * shrink);
+      n.halo.scale.setScalar(30 * shrink);
+      for (const [, obj] of n.cluster.steps) {
+        if (obj.pulsing) { obj.sprite.scale.setScalar(2.6 * (1 + Math.sin(t * 6) * 0.3)); obj.halo.scale.setScalar(7 * (1 + Math.sin(t * 6) * 0.2)); }
       }
-    }
-    for (const p of parts) {
-      ctx.fillStyle = p.amber ? 'rgba(255,179,92,.5)' : 'rgba(79,195,255,.55)';
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 7); ctx.fill();
-    }
-    ctx.font = '11px ui-monospace, Menlo, monospace';
-    for (const w of words) {
-      w.y = (w.y + w.vy + cv.height) % cv.height;
-      ctx.fillStyle = 'rgba(140,190,240,' + w.o.toFixed(3) + ')';
-      ctx.fillText(w.w, w.x, w.y);
-    }
-    requestAnimationFrame(tick);
-  })();
-})();
+    } else if (d < 60) loadCluster(name);
+  }
 
-// Live: the agent acts on its own, so the page must too.
-const events = new EventSource('/api/events');
-events.onmessage = async (m) => {
-  const data = JSON.parse(m.data);
-  if (data.type === 'executions') {
-    runs = data.executions;
-    state.counts.executions = runs.length;
-    renderSide();
-    if (view === 'brain') renderBrain();
-    if (view === 'run' && selected) {
-      const still = runs.find(r => r.id === selected);
-      if (still && still.status === 'running') openRun(selected);
+  // Labels follow their objects through space.
+  const v = new THREE.Vector3();
+  for (const l of labels) {
+    l.obj.getWorldPosition(v);
+    const d = camera.position.distanceTo(v);
+    v.project(camera);
+    const visible = v.z < 1 && d >= l.minDist && d <= l.maxDist;
+    l.el.style.display = visible ? 'block' : 'none';
+    if (visible) {
+      l.el.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
+      l.el.style.top = ((-v.y + 1) / 2 * innerHeight + 14) + 'px';
+      l.el.style.opacity = Math.max(0.25, Math.min(1, 90 / d));
     }
   }
-};
 
+  renderer.render(scene, camera);
+  frames++;
+  if (!STATIC || frames < 45) requestAnimationFrame(animate);
+}
+
+/* ————— data in ————— */
+async function load() {
+  [state, runs] = await Promise.all([
+    fetch('/api/state').then(r => r.json()),
+    fetch('/api/executions').then(r => r.json()),
+  ]);
+  renderPills(); renderSide(); buildBrain(); refreshNeuronStates();
+  const fly = new URLSearchParams(location.search).get('flyto');
+  if (fly && neurons.has(fly)) {
+    const n = neurons.get(fly);
+    await loadCluster(fly); await applyStatuses(fly);
+    controls.target.copy(n.pos);
+    camera.position.copy(n.pos.clone().add(new THREE.Vector3(6, 8, 26)));
+    focused = fly;
+  }
+  animate();
+}
 load();
+
+if (!STATIC) {
+  const events = new EventSource('/api/events');
+  events.onmessage = (m) => {
+    const data = JSON.parse(m.data);
+    if (data.type === 'executions') { runs = data.executions; renderSide(); refreshNeuronStates(); }
+  };
+}
 </script>
 </body>
 </html>`;

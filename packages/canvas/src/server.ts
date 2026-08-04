@@ -1,8 +1,20 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { layoutRadial } from "./layout.js";
 import { dashboardState, executionDetail, executionList, type Sources } from "./api.js";
 import { PAGE } from "./page.js";
 import { safeEqual } from "@squidclaw/tenants";
+
+const requireFrom = createRequire(import.meta.url);
+/** The vendored 3D engine, resolved from node_modules at serve time. */
+const threeBuild = dirname(requireFrom.resolve("three"));
+const ASSETS: Record<string, string> = {
+  "/assets/three.js": join(threeBuild, "three.module.min.js"),
+  "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
+  "/assets/orbit.js": join(threeBuild, "..", "examples", "jsm", "controls", "OrbitControls.js"),
+};
 
 export interface DashboardOptions {
   /** How often to look for new executions to push to open pages. */
@@ -74,6 +86,15 @@ export class DashboardServer {
   private handle(req: IncomingMessage, res: ServerResponse): void {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname;
+
+    // Self-hosted three.js — the brain renders offline, no CDN, no build.
+    // Assets carry no data, so they sit outside auth.
+    if (path.startsWith("/assets/")) {
+      const asset = ASSETS[path];
+      if (!asset) return this.send(res, 404, { error: "no such asset" });
+      res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
+      return void res.end(readFileSync(asset));
+    }
 
     // The door: a one-time code becomes a 30-day session cookie.
     if (path === "/login" && this.opts.auth) {
