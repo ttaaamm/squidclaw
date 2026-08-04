@@ -13,7 +13,7 @@ import {
   answerHatching, beginHatching, birthAnnouncement,
   type ElicitRequest, type HatchState,
 } from "@squidclaw/agent";
-import { ReflexStore, Scheduler, reminderNodes } from "@squidclaw/reflexes";
+import { ReflexStore, Scheduler, parseWhen, reminderNodes } from "@squidclaw/reflexes";
 import { AgentPool, LoginStore, TenantStore, PLANS, safeEqual, type Tenant } from "@squidclaw/tenants";
 import type { Sources } from "@squidclaw/canvas";
 import { habitRunner, handleCommand, type Booted } from "./boot.js";
@@ -616,7 +616,59 @@ export class Platform {
       return `${this.askOf(elicit)}\n(/cancel if you change your mind)`;
     }
 
+    this.noticeCommitment(organism, text, reply);
     return reply;
+  }
+
+  /**
+   * Inferred commitments, OpenClaw-style: after a real exchange, a hidden
+   * cheap-brain pass may notice a natural future check-in — an interview
+   * tomorrow, a flight tonight, feeling sick — and arm a one-shot reminder
+   * timed to land just after it. Capped per day, so care never becomes
+   * nagging. Fire-and-forget: a missed commitment is a shame, never a bug.
+   */
+  private noticeCommitment(
+    organism: { reflexes: { all(): Array<{ name: string; createdAt: string }>; save(r: never): void } },
+    userText: string,
+    reply: string,
+  ): void {
+    if (!reply || userText.trim().startsWith("/")) return;
+    void (async () => {
+      try {
+        const today = new Date().toISOString().slice(0, 10);
+        const todays = organism.reflexes.all()
+          .filter((r) => r.name.startsWith("commit-") && r.createdAt.slice(0, 10) === today);
+        if (todays.length >= 3) return;
+
+        const res = await this.opts.mind.complete({
+          tier: "cheap",
+          system:
+            'You notice future check-in opportunities in conversations. Given one exchange, reply ONLY JSON: ' +
+            '{"commitment":{"ask":"a short, warm check-in message to send later","when":"+18h"}} or {"commitment":null}. ' +
+            'Only when the human mentioned a concrete future event or state worth caring about afterward — an interview, ' +
+            'a flight, being sick, a deadline. "when" is relative (+4h, +1d), timed to land shortly AFTER the event. Unsure? null.',
+          messages: [{ role: "user", content: `HUMAN: ${userText}\nAGENT: ${reply}` }],
+          maxTokens: 250,
+        });
+        const start = res.text.indexOf("{");
+        const end = res.text.lastIndexOf("}");
+        if (start === -1 || end <= start) return;
+        const parsed = JSON.parse(res.text.slice(start, end + 1)) as {
+          commitment?: { ask?: string; when?: string } | null;
+        };
+        const c = parsed.commitment;
+        if (!c?.ask || !c?.when) return;
+        organism.reflexes.save({
+          name: `commit-${Date.now().toString(36)}`,
+          message: `💭 ${c.ask}`,
+          at: parseWhen(String(c.when)),
+          enabled: true,
+          createdAt: new Date().toISOString(),
+        } as never);
+      } catch {
+        // Silence is correct: a commitment is a kindness, not a contract.
+      }
+    })();
   }
 
   /**

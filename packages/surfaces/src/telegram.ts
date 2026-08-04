@@ -83,30 +83,62 @@ export class TelegramSurface implements ChatSurface {
 
   private onMessage!: MessageHandler;
 
-  /** Shared rhythm for every message kind: typing, progress, answer, apologise. */
+  /**
+   * Shared rhythm for every message kind: typing, progress, answer, apologise.
+   *
+   * Progress is a DRAFT, not a stack: the first note becomes one visible
+   * "working…" message that edits in place as the work moves, then quietly
+   * disappears when the real answer lands as a fresh message (fresh, so the
+   * human still gets a notification — edits are silent on Telegram).
+   */
   private async handleWith(ctx: Context, produceText: () => Promise<string>): Promise<void> {
     // Show life immediately, and keep showing it for as long as the work runs.
     const typing = () => void ctx.replyWithChatAction("typing").catch(() => {});
     typing();
     const heartbeat = setInterval(typing, TYPING_REFRESH_MS);
 
+    const chatId = ctx.chat!.id;
     const started = Date.now();
     let lastNote = 0;
+    let draft: { id: number; text: string } | null = null;
+    let chain: Promise<void> = Promise.resolve(); // edits stay in order
+
     const progress = (note: string) => {
       const now = Date.now();
       // Say something only when it's genuinely taking a while — and not too often.
       if (now - started < this.progressAfterMs) return;
       if (now - lastNote < this.progressGapMs) return;
       lastNote = now;
-      void ctx.reply(`⚙️ ${note}`).catch(() => {});
+      const text = `⚙️ ${note}`;
+      chain = chain.then(async () => {
+        try {
+          if (!draft) {
+            const m = await ctx.reply(text);
+            if (m && (m as { message_id?: number }).message_id) draft = { id: m.message_id, text };
+          } else if (draft.text !== text) {
+            await ctx.api.editMessageText(chatId, draft.id, text);
+            draft.text = text;
+          }
+        } catch { /* progress is a courtesy, never a failure */ }
+      });
+    };
+
+    const clearDraft = async () => {
+      await chain;
+      if (draft) {
+        await ctx.api.deleteMessage(chatId, draft.id).catch(() => {});
+        draft = null;
+      }
     };
 
     try {
       const text = await produceText();
-      const reply = await this.onMessage(String(ctx.chat!.id), text, progress);
+      const reply = await this.onMessage(String(chatId), text, progress);
+      await clearDraft();
       if (!reply) return; // the flow spoke for itself
       await ctx.reply(reply);
     } catch (err) {
+      await clearDraft();
       await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       clearInterval(heartbeat);

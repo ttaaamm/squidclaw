@@ -13,6 +13,7 @@ import { docReadNode } from "./doc-read.js";
 import { gotenbergRenderNode, canvasSnapNode, browserSnapNode } from "./gotenberg.js";
 
 export * from "./echo.js";
+export * from "./retry.js";
 export * from "./http-request.js";
 export * from "./shell.js";
 export * from "./web.js";

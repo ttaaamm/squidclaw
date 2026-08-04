@@ -1,4 +1,5 @@
 import { binaryBuffer, type Item, type NodeDef } from "@squidclaw/kernel";
+import { fetchWithRetry } from "./retry.js";
 
 export interface TelegramSendOptions {
   /** Overridable for tests; defaults to the real Bot API. */
@@ -49,14 +50,14 @@ export function telegramSendNode(opts: TelegramSendOptions = {}): NodeDef {
         form.append("chat_id", String(params.chatId));
         if (params.text) form.append("caption", String(params.text));
         form.append(field, new Blob([new Uint8Array(binary)]), String(params.filename));
-        const res = await fetch(`${api}/${method}`, { method: "POST", body: form });
+        const res = await fetchWithRetry(`${api}/${method}`, { method: "POST", body: form });
         const body = (await res.json()) as { ok: boolean; description?: string };
         if (!body.ok) throw new Error(`telegram.send: ${body.description ?? `HTTP ${res.status}`}`);
         return [{ json: { sent: true, kind: field, filename: params.filename } }];
       }
 
       if (!params.text) throw new Error("telegram.send: nothing to send — give me text, or a filename plus binary input");
-      const res = await fetch(`${api}/sendMessage`, {
+      const res = await fetchWithRetry(`${api}/sendMessage`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ chat_id: params.chatId, text: params.text }),
@@ -91,7 +92,7 @@ export function telegramPollNode(opts: TelegramSendOptions = {}): NodeDef {
       if (!Array.isArray(options) || options.length < 2) {
         throw new Error("telegram.poll: a poll needs at least two options");
       }
-      const res = await fetch(`${opts.apiRoot ?? "https://api.telegram.org"}/bot${token}/sendPoll`, {
+      const res = await fetchWithRetry(`${opts.apiRoot ?? "https://api.telegram.org"}/bot${token}/sendPoll`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

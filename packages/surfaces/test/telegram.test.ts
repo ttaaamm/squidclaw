@@ -22,9 +22,13 @@ const botInfo = {
 
 function capture(surface: TelegramSurface) {
   const sent: Array<{ method: string; payload: Record<string, unknown> }> = [];
+  let nextId = 100;
   surface.bot.api.config.use(async (_prev, method, payload) => {
     sent.push({ method, payload: payload as Record<string, unknown> });
-    return { ok: true as const, result: true as never };
+    // sendMessage answers with a real-looking message so drafts can be
+    // edited and deleted by id, the way Telegram actually behaves.
+    const result = method === "sendMessage" ? { message_id: nextId++, chat: { id: 77 } } : true;
+    return { ok: true as const, result: result as never };
   });
   return sent;
 }
@@ -56,7 +60,7 @@ describe("telegram surface", () => {
     expect(sent[0].payload.action).toBe("typing");
   });
 
-  it("narrates progress when work drags, but stays quiet for quick answers", async () => {
+  it("progress is ONE draft that edits in place, then makes way for the answer", async () => {
     // Thresholds at zero: every note passes the throttle.
     const chatty = make(async (_c, _t, progress) => {
       progress?.("running web.search…");
@@ -66,8 +70,19 @@ describe("telegram surface", () => {
     const sentChatty = capture(chatty);
     await chatty.bot.handleUpdate(fakeUpdate("look it up"));
 
-    const notes = sentChatty.filter((s) => s.method === "sendMessage").map((s) => s.payload.text);
-    expect(notes).toEqual(["⚙️ running web.search…", "⚙️ running web.read…", "found it"]);
+    // One visible working message…
+    const notes = sentChatty.filter((s) => s.method === "sendMessage" && String(s.payload.text).startsWith("⚙️"));
+    expect(notes).toHaveLength(1);
+    expect(notes[0].payload.text).toBe("⚙️ running web.search…");
+    // …that edits as the work moves…
+    const edits = sentChatty.filter((s) => s.method === "editMessageText");
+    expect(edits).toHaveLength(1);
+    expect(edits[0].payload.text).toBe("⚙️ running web.read…");
+    // …and disappears before the real answer lands as a fresh message.
+    const deletes = sentChatty.filter((s) => s.method === "deleteMessage");
+    expect(deletes).toHaveLength(1);
+    const finals = sentChatty.filter((s) => s.method === "sendMessage").map((s) => s.payload.text);
+    expect(finals.at(-1)).toBe("found it");
 
     // Default thresholds: a fast task says nothing but its answer.
     const quiet = make(async (_c, _t, progress) => {
@@ -79,6 +94,7 @@ describe("telegram surface", () => {
 
     const quietMessages = sentQuiet.filter((s) => s.method === "sendMessage").map((s) => s.payload.text);
     expect(quietMessages).toEqual(["instant"]);
+    expect(sentQuiet.filter((s) => s.method === "deleteMessage")).toHaveLength(0);
   });
 
   it("throttles a flood of notes down to a trickle", async () => {
@@ -89,7 +105,9 @@ describe("telegram surface", () => {
     const sent = capture(surface);
     await surface.bot.handleUpdate(fakeUpdate("big job"));
 
-    const notes = sent.filter((s) => s.method === "sendMessage" && String(s.payload.text).startsWith("⚙️"));
+    const notes = sent.filter(
+      (s) => (s.method === "sendMessage" || s.method === "editMessageText") && String(s.payload.text).startsWith("⚙️"),
+    );
     expect(notes).toHaveLength(1); // first passes, the rest wait out the gap
   });
 

@@ -1,4 +1,5 @@
 import { createContext, runInContext } from "node:vm";
+import { fetchWithRetry } from "./retry.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -214,7 +215,7 @@ async function telegramStep(
   const operation = String(p.operation ?? "sendMessage");
 
   const call = async (method: string, payload: Record<string, unknown>) => {
-    const res = await fetch(`${api}/${method}`, {
+    const res = await fetchWithRetry(`${api}/${method}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
@@ -255,7 +256,7 @@ async function telegramStep(
     const caption = (extra.caption ?? p.caption) as string | undefined;
     if (caption) form.append("caption", caption);
     form.append(field, new Blob([new Uint8Array(binaryBuffer(binary))]), fileName);
-    const res = await fetch(`${api}/${operation === "sendPhoto" ? "sendPhoto" : "sendDocument"}`, {
+    const res = await fetchWithRetry(`${api}/${operation === "sendPhoto" ? "sendPhoto" : "sendDocument"}`, {
       method: "POST", body: form,
     });
     const body = (await res.json()) as { ok: boolean; description?: string };
