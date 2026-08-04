@@ -111,7 +111,7 @@ describe("n8n.step — the dialect", () => {
 
   it("names the type honestly when the dialect doesn't speak it", async () => {
     await expect(
-      n8nStepNode.run({ type: "n8n-nodes-base.spreadsheetFile", parameters: {} }, [], ctx),
+      n8nStepNode.run({ type: "n8n-nodes-base.googleSheets", parameters: {} }, [], ctx),
     ).rejects.toThrow(/no native support yet/);
   });
 });
@@ -143,11 +143,11 @@ describe("importing real shapes", () => {
     const { graph, unsupported } = importN8nWorkflow({
       nodes: [
         { name: "Note", type: "n8n-nodes-base.stickyNote" },
-        { name: "Sheet", type: "n8n-nodes-base.spreadsheetFile" },
+        { name: "Sheet", type: "n8n-nodes-base.googleSheets" },
       ],
     });
     expect(graph.nodes).toHaveLength(1);
-    expect(unsupported).toEqual([{ node: "Sheet", type: "n8n-nodes-base.spreadsheetFile" }]);
+    expect(unsupported).toEqual([{ node: "Sheet", type: "n8n-nodes-base.googleSheets" }]);
   });
 });
 

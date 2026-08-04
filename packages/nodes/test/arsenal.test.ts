@@ -161,8 +161,12 @@ describe("the arsenal is registered", () => {
     clearNodes();
     registerBuiltinNodes();
     expect(listNodes().map((n) => n.name).sort()).toEqual([
-      "audio.transcribe", "browser.snap", "canvas.snap", "doc.read", "echo",
-      "email.read", "email.send", "gotenberg.render", "http.request", "n8n.step",
+      "audio.transcribe", "browser.snap", "canvas.snap",
+      "csv.read",
+      "csv.write", "doc.read", "echo",
+      "email.read", "email.send", "gotenberg.render", "http.request",
+      "image.generate",
+      "instagram.publish", "n8n.step",
       "pdf.create", "pptx.create", "shell.exec", "squidflow.import", "ssh.exec",
       "telegram.poll", "telegram.send", "unsupported.node", "vision.look",
       "voice.say", "web.read", "web.search",

@@ -11,9 +11,15 @@ import { visionLookNode, voiceSayNode, transcribeNode } from "./senses.js";
 import { emailSendNode, emailReadNode } from "./email.js";
 import { docReadNode } from "./doc-read.js";
 import { gotenbergRenderNode, canvasSnapNode, browserSnapNode } from "./gotenberg.js";
+import { imageGenerateNode } from "./images.js";
+import { instagramPublishNode } from "./social.js";
+import { csvReadNode, csvWriteNode } from "./tables.js";
 
 export * from "./echo.js";
 export * from "./retry.js";
+export * from "./images.js";
+export * from "./social.js";
+export * from "./tables.js";
 export * from "./http-request.js";
 export * from "./shell.js";
 export * from "./web.js";
@@ -51,6 +57,10 @@ export function registerBuiltinNodes(): void {
     telegramPollNode(),
     emailSendNode(),
     emailReadNode(),
+    imageGenerateNode(),
+    instagramPublishNode(),
+    csvReadNode,
+    csvWriteNode,
   ]) {
     registerNode(node);
   }

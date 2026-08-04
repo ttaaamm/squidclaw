@@ -1,5 +1,6 @@
 import { createContext, runInContext } from "node:vm";
 import { fetchWithRetry } from "./retry.js";
+import { csvMake, csvParse } from "./tables.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -22,16 +23,22 @@ const SUPPORTED = new Set([
   "n8n-nodes-base.manualTrigger",
   "n8n-nodes-base.telegramTrigger",
   "n8n-nodes-base.executeWorkflowTrigger",
+  "n8n-nodes-base.scheduleTrigger",
+  "n8n-nodes-base.webhook",
   "n8n-nodes-base.noOp",
   "n8n-nodes-base.set",
   "n8n-nodes-base.code",
   "n8n-nodes-base.if",
   "n8n-nodes-base.switch",
+  "n8n-nodes-base.filter",
   "n8n-nodes-base.merge",
+  "n8n-nodes-base.wait",
+  "n8n-nodes-base.aggregate",
   "n8n-nodes-base.httpRequest",
   "n8n-nodes-base.telegram",
   "n8n-nodes-base.readWriteFile",
   "n8n-nodes-base.extractFromFile",
+  "n8n-nodes-base.spreadsheetFile",
 ]);
 
 export const isSupportedN8nType = (type: string): boolean => SUPPORTED.has(type);
@@ -309,10 +316,58 @@ async function executeStep(
       case "n8n-nodes-base.manualTrigger":
       case "n8n-nodes-base.telegramTrigger":
       case "n8n-nodes-base.executeWorkflowTrigger":
+      case "n8n-nodes-base.scheduleTrigger":
+      case "n8n-nodes-base.webhook":
       case "n8n-nodes-base.noOp":
       case "n8n-nodes-base.merge":
-        // Triggers are entry markers here — the chat/webhook already fired.
+        // Triggers are entry markers here — the chat/reflex/webhook already fired.
         return items.length ? items : [{ json: {} }];
+
+      case "n8n-nodes-base.filter": {
+        // Like IF, but one lane: items that pass continue, the rest vanish.
+        return items.filter((item) => evalConditions(parameters.conditions as never, item, items, ctx));
+      }
+
+      case "n8n-nodes-base.wait": {
+        // Real pauses, capped: a drip-campaign's "wait 3 days" cannot hold a
+        // chat process hostage — long waits belong to reflexes.
+        const unit = String(parameters.unit ?? "seconds");
+        const amount = Number(resolveExpr(parameters.amount, items[0], items, ctx) ?? 0);
+        const ms = amount * (unit.startsWith("minute") ? 60_000 : unit.startsWith("hour") ? 3_600_000 : unit.startsWith("day") ? 86_400_000 : 1000);
+        const cap = Number(process.env.SQUIDCLAW_WAIT_CAP_MS ?? 300_000);
+        const waited = Math.max(0, Math.min(ms, cap));
+        await new Promise((r) => setTimeout(r, waited));
+        const base = items.length ? items : [{ json: {} } as Item];
+        return base.map((item) => ({ ...item, json: { ...item.json, waitedMs: waited, ...(ms > cap ? { waitCapped: true } : {}) } }));
+      }
+
+      case "n8n-nodes-base.aggregate": {
+        // Many items become one, their data gathered under `data`.
+        return [{ json: { data: items.map((i) => i.json) } }];
+      }
+
+      case "n8n-nodes-base.spreadsheetFile": {
+        const operation = String(parameters.operation ?? "fromFile");
+        const format = String(parameters.fileFormat ?? "csv");
+        if (format !== "csv") {
+          throw new Error(`spreadsheetFile: only csv is spoken natively so far (got "${format}") — export as CSV, or ask for xlsx support`);
+        }
+        if (operation === "toFile") {
+          const csv = csvMake(items.map((i) => i.json));
+          const buf = Buffer.from(csv, "utf8");
+          return [{
+            json: { fileName: "sheet.csv", rows: items.length },
+            binary: { data: { data: buf, fileName: "sheet.csv", mimeType: "text/csv", fileSize: buf.length } },
+          }];
+        }
+        const out: Item[] = [];
+        for (const item of items) {
+          const bin = item.binary?.[String(parameters.binaryPropertyName ?? "data")];
+          if (!bin) throw new Error("spreadsheetFile: no binary to read");
+          for (const row of csvParse(binaryBuffer(bin).toString("utf8"))) out.push({ json: row });
+        }
+        return out;
+      }
 
       case "n8n-nodes-base.set": {
         const assignments =
