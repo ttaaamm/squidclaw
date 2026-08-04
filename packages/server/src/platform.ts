@@ -10,7 +10,7 @@ import {
 import { extractTextFromFile } from "@squidclaw/nodes";
 import {
   Agent, FlowStore, VibeState, loadVibes,
-  answerHatching, beginHatching, birthAnnouncement,
+  answerHatching, beginHatching, birthAnnouncement, dream,
   type ElicitRequest, type HatchState,
 } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, parseWhen, reminderNodes } from "@squidclaw/reflexes";
@@ -131,8 +131,14 @@ export class Platform {
       ],
     });
 
-    // Old unused memories fade; the load-bearing ones never do.
-    const sweep = () => memory.decay({ maxAgeDays: 45, protect: ["my-human", "my-purpose"] });
+    // The nightly cycle: old unused memories fade (decay), then the agent
+    // sleeps on what remains (dreaming) — duplicates collapse, fragments
+    // merge, trivia is let go, and every change lands in DREAMS.md.
+    const protect = ["my-human", "my-purpose"];
+    const sweep = () => {
+      memory.decay({ maxAgeDays: 45, protect });
+      void dream(memory, this.opts.mind, join(dir, "DREAMS.md"), { protect });
+    };
     sweep();
     const decayTimer = setInterval(sweep, 24 * 3_600_000);
     decayTimer.unref?.();
