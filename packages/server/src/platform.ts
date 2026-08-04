@@ -537,6 +537,10 @@ if (sub === "scopes") {
       return this.adminCommand(trimmed);
     }
 
+    if (admin && trimmed === "/doctor") {
+      return this.doctor();
+    }
+
     if (admin && trimmed === "/plugins") {
       const info = this.opts.plugins;
       const installed = info?.plugins.length
@@ -666,6 +670,85 @@ if (sub === "scopes") {
 
     this.noticeCommitment(organism, text, reply);
     return reply;
+  }
+
+  /**
+   * The physician's round: one message, every vital sign. Env, mind, disk,
+   * renderer tunnel, key store, tenants, plugins — each line ✅ or ⚠️ with
+   * the fix named. What OpenClaw calls `doctor`, at home in the chat.
+   */
+  private async doctor(): Promise<string> {
+    const lines: string[] = ["🩺 Doctor's report:"];
+    const ok = (s: string) => lines.push(`✅ ${s}`);
+    const warn = (s: string) => lines.push(`⚠️ ${s}`);
+
+    // Who am I running as? Root is a disease now, not a default.
+    try {
+      const { userInfo } = await import("node:os");
+      const user = userInfo().username;
+      if (user === "root") warn("running as root — the squidclaw service user exists for a reason");
+      else ok(`running as ${user}`);
+    } catch { /* windows dev boxes have no opinion */ }
+
+    for (const name of ["TELEGRAM_BOT_TOKEN", "SQUIDCLAW_ADMIN_CHAT"]) {
+      if (process.env[name]) ok(`${name} set`);
+      else warn(`${name} missing`);
+    }
+    if (!process.env.SQUIDCLAW_PUBLIC_URL) warn("SQUIDCLAW_PUBLIC_URL unset — canvas links will point at localhost");
+
+    // The mind, live: a real (tiny) thought with a deadline.
+    try {
+      const pong = await Promise.race([
+        this.opts.mind.complete({ tier: "cheap", messages: [{ role: "user", content: "Reply with exactly: ok" }], maxTokens: 5 }),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timed out after 20s")), 20_000)),
+      ]);
+      ok(`mind answering via ${this.opts.via} (${pong.text.trim().slice(0, 20) || "…"})`);
+    } catch (err) {
+      warn(`mind NOT answering via ${this.opts.via}: ${String(err instanceof Error ? err.message : err).slice(0, 120)}`);
+    }
+
+    // Disk under the workspace.
+    try {
+      const { statfsSync } = await import("node:fs");
+      const s = statfsSync(this.opts.root);
+      const freeGb = (s.bavail * s.bsize) / 1024 ** 3;
+      if (freeGb < 2) warn(`disk low: ${freeGb.toFixed(1)} GB free under the workspace`);
+      else ok(`disk: ${freeGb.toFixed(1)} GB free`);
+    } catch { warn("disk: could not measure"); }
+
+    // The renderer tunnel (Gotenberg) — the formal post dies without it.
+    const gotenberg = process.env.GOTENBERG_URL;
+    if (gotenberg) {
+      try {
+        const res = await fetch(`${gotenberg}/health`, { signal: AbortSignal.timeout(4000) });
+        if (res.ok) ok("gotenberg tunnel healthy");
+        else warn(`gotenberg tunnel answered HTTP ${res.status}`);
+      } catch { warn("gotenberg tunnel unreachable — check the squidclaw-gotenberg service"); }
+    } else warn("GOTENBERG_URL unset — no renderer");
+
+    // The social key store: names only, never values.
+    try {
+      const { readFileSync: read } = await import("node:fs");
+      const keys = JSON.parse(read(process.env.SQUIDCLAW_SOCIAL_KEYS ?? "/opt/social/keys.json", "utf8")) as Record<string, string>;
+      const present = Object.keys(keys).filter((k) => keys[k]);
+      if (present.length) ok(`key store: ${present.join(", ")}`);
+      else warn("key store exists but is empty");
+    } catch { warn("no social key store (fine unless flows need AI keys)"); }
+
+    if (process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID) ok("instagram connected");
+    else lines.push("◦ instagram not connected (INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_ACCOUNT_ID)");
+
+    const tenants = this.tenants.all();
+    ok(`tenants: ${tenants.length} (${this.organisms.size} warm)`);
+
+    const p = this.opts.plugins;
+    if (p) {
+      const failedCount = Object.keys(p.failed).length;
+      if (failedCount) warn(`plugins: ${p.plugins.length} loaded, ${failedCount} FAILED (/plugins for details)`);
+      else ok(`plugins: ${p.plugins.length} loaded`);
+    }
+
+    return lines.join("\n");
   }
 
   /**

@@ -290,3 +290,22 @@ describe("/plugins — the marketplace door", () => {
     platform.stop();
   });
 });
+
+describe("/doctor — the physician's round", () => {
+  it("reports vitals with fixes named, admin-only", async () => {
+    const root = mkdtempSync(join(tmpdir(), "platform-"));
+    writeFileSync(join(root, "INNERME.md"), "# INNER ME\n");
+    process.env.TELEGRAM_BOT_TOKEN = "test-token";
+    delete process.env.GOTENBERG_URL;
+    const { mind } = scriptedMind([says("ok")]);
+    const platform = new Platform({ root, mind, via: "cli", adminChats: ["telegram:999"] });
+
+    const report = await platform.handle("telegram", "999", "/doctor");
+    expect(report).toContain("Doctor");
+    expect(report).toContain("✅ TELEGRAM_BOT_TOKEN set");
+    expect(report).toContain("mind answering via cli");
+    expect(report).toContain("GOTENBERG_URL unset");
+    expect(report).toContain("tenants: 0");
+    platform.stop();
+  });
+});
