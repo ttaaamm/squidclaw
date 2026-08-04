@@ -1,7 +1,29 @@
+/**
+ * Binary flowing between nodes: a bare Buffer (native nodes), or n8n's
+ * richer envelope — content plus fileName/mimeType. Imported Code nodes
+ * mutate the envelope (`item.binary.data.fileName = …`), and Gotenberg
+ * literally refuses uploads not named index.html, so the metadata is not
+ * decoration; it must survive the trip between steps.
+ */
+export type BinaryValue =
+  | Buffer
+  | { data: Buffer | string; fileName?: string; mimeType?: string; fileExtension?: string };
+
+/** The bytes, whichever shape they travel in. String content is base64 (n8n's wire format). */
+export function binaryBuffer(value: BinaryValue): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  return Buffer.isBuffer(value.data) ? value.data : Buffer.from(value.data, "base64");
+}
+
+export function binaryMeta(value: BinaryValue | undefined): { fileName?: string; mimeType?: string } {
+  if (!value || Buffer.isBuffer(value)) return {};
+  return { fileName: value.fileName, mimeType: value.mimeType };
+}
+
 /** One unit of data flowing between nodes. Always handled in arrays. */
 export interface Item {
   json: Record<string, unknown>;
-  binary?: Record<string, Buffer>;
+  binary?: Record<string, BinaryValue>;
 }
 
 export interface NodeContext {
@@ -58,7 +80,8 @@ export interface StepRecord {
   params: Record<string, unknown>;
   input: Item[];
   output: Item[];
-  status: "ok" | "error";
+  /** "skipped" = the node received no items, so — as in n8n — it never ran. */
+  status: "ok" | "error" | "skipped";
   error?: string;
   startedAt: string;
   finishedAt: string;

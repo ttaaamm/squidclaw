@@ -1,8 +1,12 @@
 import { createContext, runInContext } from "node:vm";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { withBranches, type Item, type NodeContext, type NodeDef } from "@squidclaw/kernel";
+import { createRequire, isBuiltin } from "node:module";
+import {
+  binaryBuffer, binaryMeta, branchesOf, withBranches,
+  type BinaryValue, type Item, type NodeContext, type NodeDef,
+} from "@squidclaw/kernel";
 
 /**
  * The n8n dialect, spoken natively.
@@ -30,6 +34,8 @@ const SUPPORTED = new Set([
 ]);
 
 export const isSupportedN8nType = (type: string): boolean => SUPPORTED.has(type);
+
+const hostRequire = createRequire(import.meta.url);
 
 /** Where a flow's staticData lives — n8n's cross-run memory, file-backed. */
 function staticPath(flowSlug: string): string {
@@ -160,6 +166,12 @@ async function runCode(
     $getWorkflowStaticData: (_scope?: string) => staticData,
     console: { log: () => {}, error: () => {}, warn: () => {} },
     JSON, Math, Date, Object, Array, String, Number, Boolean, Buffer,
+    // n8n's NODE_FUNCTION_ALLOW_BUILTIN, honored: imported Code nodes may
+    // require node builtins (fs, path, crypto…) — never node_modules.
+    require: (name: string) => {
+      if (!isBuiltin(name)) throw new Error(`require("${name}"): only Node builtins are available in Code steps`);
+      return hostRequire(name);
+    },
   };
 
   const vmCtx = createContext(sandbox);
@@ -172,9 +184,11 @@ async function runCode(
   saveStatic(flowSlug, staticData);
 
   // n8n Code nodes return an array of items (or a single item); normalize.
+  // Binary passes through untouched — it may be a Buffer or n8n's envelope
+  // ({data: base64, fileName, mimeType}); binaryBuffer() reads both.
   const arr = Array.isArray(out) ? out : out === undefined || out === null ? [] : [out];
   return arr.map((entry) => {
-    const record = entry as { json?: Record<string, unknown>; binary?: Record<string, Buffer> };
+    const record = entry as { json?: Record<string, unknown>; binary?: Record<string, BinaryValue> };
     if (record && typeof record === "object" && "json" in record) {
       return { json: record.json ?? {}, ...(record.binary ? { binary: record.binary } : {}) } as Item;
     }
@@ -182,7 +196,7 @@ async function runCode(
   });
 }
 
-async function telegramSend(
+async function telegramStep(
   parameters: Record<string, unknown>,
   item: Item,
   items: Item[],
@@ -190,23 +204,57 @@ async function telegramSend(
 ): Promise<Item> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("telegram step: TELEGRAM_BOT_TOKEN missing");
-  const api = `${process.env.SQUIDCLAW_TELEGRAM_API ?? "https://api.telegram.org"}/bot${token}`;
+  const base = process.env.SQUIDCLAW_TELEGRAM_API ?? "https://api.telegram.org";
+  const api = `${base}/bot${token}`;
 
   const p = resolveExpr(parameters, item, items, ctx) as Record<string, unknown>;
   const chatId = String(p.chatId ?? "");
   const extra = (p.additionalFields ?? {}) as Record<string, unknown>;
+  const resource = String(p.resource ?? "message");
   const operation = String(p.operation ?? "sendMessage");
+
+  const call = async (method: string, payload: Record<string, unknown>) => {
+    const res = await fetch(`${api}/${method}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await res.json()) as { ok: boolean; result?: unknown; description?: string };
+    if (!body.ok) throw new Error(`telegram step ${method}: ${body.description ?? res.status}`);
+    return body.result;
+  };
+
+  // n8n's file resource: getFile, then download the bytes as binary.
+  if (resource === "file") {
+    const file = (await call("getFile", { file_id: String(p.fileId ?? "") })) as { file_path?: string };
+    if (!file?.file_path) throw new Error("telegram step: getFile returned no file_path");
+    const res = await fetch(`${base}/file/bot${token}/${file.file_path}`);
+    if (!res.ok) throw new Error(`telegram step: file download HTTP ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const fileName = basename(file.file_path);
+    return {
+      json: { ...item.json, ...file },
+      binary: { data: { data: buf, fileName, mimeType: res.headers.get("content-type") ?? undefined } },
+    };
+  }
+
+  if (operation === "deleteMessage") {
+    await call("deleteMessage", { chat_id: chatId, message_id: Number(p.messageId) });
+    return { json: { deleted: true, chatId } };
+  }
 
   const binaryProp = String(p.binaryPropertyName ?? "data");
   const binary = item.binary?.[binaryProp];
 
   if ((operation === "sendPhoto" || operation === "sendDocument" || p.binaryData === true) && binary) {
     const field = operation === "sendPhoto" ? "photo" : "document";
+    const meta = binaryMeta(binary);
+    const fileName = String(p.fileName ?? meta.fileName ?? item.json.fileName ?? `${field}.bin`);
     const form = new FormData();
     form.append("chat_id", chatId);
     const caption = (extra.caption ?? p.caption) as string | undefined;
     if (caption) form.append("caption", caption);
-    form.append(field, new Blob([new Uint8Array(binary)]), String(p.fileName ?? `${field}.bin`));
+    form.append(field, new Blob([new Uint8Array(binaryBuffer(binary))]), fileName);
     const res = await fetch(`${api}/${operation === "sendPhoto" ? "sendPhoto" : "sendDocument"}`, {
       method: "POST", body: form,
     });
@@ -215,17 +263,11 @@ async function telegramSend(
     return { json: { sent: true, kind: field, chatId } };
   }
 
-  const res = await fetch(`${api}/sendMessage`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: String(p.text ?? ""),
-      ...(extra.parse_mode ? { parse_mode: extra.parse_mode } : {}),
-    }),
+  await call("sendMessage", {
+    chat_id: chatId,
+    text: String(p.text ?? ""),
+    ...(extra.parse_mode ? { parse_mode: extra.parse_mode } : {}),
   });
-  const body = (await res.json()) as { ok: boolean; description?: string };
-  if (!body.ok) throw new Error(`telegram step: ${body.description ?? res.status}`);
   return { json: { sent: true, kind: "message", chatId } };
 }
 
@@ -236,10 +278,31 @@ export const n8nStepNode: NodeDef = {
     "Executes one imported n8n workflow step natively (code, if, switch, telegram, files, http). Used inside imported SquidFlows — not meant for direct calls.",
   inputSchema: { type: "object", additionalProperties: true },
   run: async (params, items, ctx) => {
+    // n8n's "error output": a step configured onError=continueErrorOutput gets
+    // a second lane — success on branch 0, the failure (as an item carrying
+    // `error`) on branch 1 — instead of killing the whole run. The importer
+    // stamps __errorOutput from the source workflow.
+    if (params.__errorOutput === true) {
+      try {
+        const result = await executeStep(params, items, ctx);
+        return branchesOf(result) ? result : withBranches([result, []]);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return withBranches([[], [{ json: { ...(items[0]?.json ?? {}), error: message } }]]);
+      }
+    }
+    return executeStep(params, items, ctx);
+  },
+};
+
+async function executeStep(
+  params: Record<string, unknown>,
+  items: Item[],
+  ctx: NodeContext,
+): Promise<Item[]> {
     const type = String(params.type ?? "");
     const parameters = (params.parameters ?? {}) as Record<string, unknown>;
     const flowSlug = String(params.__flow ?? "imported");
-    const first = items[0];
 
     switch (type) {
       case "n8n-nodes-base.manualTrigger":
@@ -294,31 +357,81 @@ export const n8nStepNode: NodeDef = {
         for (const item of items.length ? items : [{ json: {} } as Item]) {
           const p = resolveExpr(parameters, item, items, ctx) as Record<string, unknown>;
           const method = String(p.method ?? "GET");
-          const body =
-            p.jsonBody !== undefined
-              ? typeof p.jsonBody === "string" ? p.jsonBody : JSON.stringify(p.jsonBody)
-              : p.sendBody && p.bodyParameters
-                ? JSON.stringify(
-                    Object.fromEntries(
-                      (((p.bodyParameters as { parameters?: Array<{ name: string; value: unknown }> })?.parameters) ?? [])
-                        .map((bp) => [bp.name, bp.value]),
-                    ),
-                  )
-                : undefined;
+          const respOpts =
+            (((p.options as { response?: { response?: Record<string, unknown> } })?.response)?.response) ?? {};
+
+          // Custom headers — the AI calls die as anonymous without these.
+          const headers: Record<string, string> = {};
+          for (const h of (((p.headerParameters as { parameters?: Array<{ name: string; value: unknown }> })
+            ?.parameters) ?? [])) {
+            if (h.name) headers[String(h.name).toLowerCase()] = String(h.value ?? "");
+          }
+
+          let body: BodyInit | undefined;
+          const bodyParams =
+            ((p.bodyParameters as { parameters?: Array<Record<string, unknown>> })?.parameters) ?? [];
+
+          if (p.contentType === "multipart-form-data") {
+            // Gotenberg's lane: fields plus binary file parts, each keeping
+            // its fileName (index.html is not optional there).
+            const form = new FormData();
+            for (const bp of bodyParams) {
+              if (bp.parameterType === "formBinaryData") {
+                const field = String(bp.inputDataFieldName ?? "data");
+                const bin = item.binary?.[field];
+                if (!bin) throw new Error(`httpRequest: no binary "${field}" for multipart part "${bp.name}"`);
+                const meta = binaryMeta(bin);
+                form.append(
+                  String(bp.name ?? "file"),
+                  new Blob([new Uint8Array(binaryBuffer(bin))], { type: meta.mimeType ?? "application/octet-stream" }),
+                  meta.fileName ?? String(item.json.fileName ?? "file.bin"),
+                );
+              } else {
+                form.append(String(bp.name ?? ""), String(bp.value ?? ""));
+              }
+            }
+            delete headers["content-type"]; // fetch sets the multipart boundary
+            body = form;
+          } else if (p.jsonBody !== undefined) {
+            body = typeof p.jsonBody === "string" ? p.jsonBody : JSON.stringify(p.jsonBody);
+            headers["content-type"] = headers["content-type"] ?? "application/json";
+          } else if (p.sendBody && bodyParams.length) {
+            body = JSON.stringify(Object.fromEntries(bodyParams.map((bp) => [String(bp.name), bp.value])));
+            headers["content-type"] = headers["content-type"] ?? "application/json";
+          }
+
           const res = await fetch(String(p.url), {
             method,
-            headers: body ? { "content-type": "application/json" } : undefined,
+            headers: Object.keys(headers).length ? headers : undefined,
             body: method === "GET" ? undefined : body,
           });
+
+          // n8n throws on 4xx/5xx unless the node opted into neverError —
+          // the AI steps here do exactly that and inspect the body instead.
+          if (!res.ok && respOpts.neverError !== true) {
+            const snippet = (await res.text()).slice(0, 300);
+            throw new Error(`httpRequest: HTTP ${res.status} from ${new URL(String(p.url)).host}${snippet ? `: ${snippet}` : ""}`);
+          }
+
           const contentType = res.headers.get("content-type") ?? "";
-          if (contentType.includes("json") || contentType.startsWith("text/")) {
+          const wantsFile = respOpts.responseFormat === "file";
+          if (wantsFile || (!contentType.includes("json") && !contentType.startsWith("text/"))) {
+            const buf = Buffer.from(await res.arrayBuffer());
+            const prop = String(respOpts.outputPropertyName ?? "data");
+            out.push({ json: { ...item.json }, binary: { [prop]: { data: buf, mimeType: contentType || undefined } } });
+          } else {
+            // n8n hands the response body straight through as $json —
+            // downstream code does res.content[0].text, not res.body.content.
             const text = await res.text();
             let parsed: unknown = text;
             try { parsed = JSON.parse(text); } catch { /* keep text */ }
-            out.push({ json: { statusCode: res.status, body: parsed } as Record<string, unknown> });
-          } else {
-            const buf = Buffer.from(await res.arrayBuffer());
-            out.push({ json: { statusCode: res.status, mimeType: contentType }, binary: { data: buf } });
+            if (Array.isArray(parsed)) {
+              for (const entry of parsed) out.push({ json: entry as Record<string, unknown> });
+            } else if (parsed && typeof parsed === "object") {
+              out.push({ json: parsed as Record<string, unknown> });
+            } else {
+              out.push({ json: { data: parsed } });
+            }
           }
         }
         return out;
@@ -327,7 +440,7 @@ export const n8nStepNode: NodeDef = {
       case "n8n-nodes-base.telegram": {
         const out: Item[] = [];
         for (const item of items.length ? items : [{ json: {} } as Item]) {
-          out.push(await telegramSend(parameters, item, items, ctx));
+          out.push(await telegramStep(parameters, item, items, ctx));
         }
         return out;
       }
@@ -342,12 +455,12 @@ export const n8nStepNode: NodeDef = {
             const data = item.binary?.[prop];
             if (!data) throw new Error(`readWriteFile: no binary "${prop}" to write`);
             mkdirSync(dirname(fileName), { recursive: true });
-            writeFileSync(fileName, data);
+            writeFileSync(fileName, binaryBuffer(data));
             out.push({ ...item, json: { ...item.json, fileName } });
           } else {
             const fileName = resolve(String(p.fileSelector ?? p.fileName ?? ""));
             const data = readFileSync(fileName);
-            out.push({ json: { fileName }, binary: { data } });
+            out.push({ json: { fileName }, binary: { data: { data, fileName: basename(fileName) } } });
           }
         }
         return out;
@@ -359,8 +472,9 @@ export const n8nStepNode: NodeDef = {
           const p = resolveExpr(parameters, item, items, ctx) as Record<string, unknown>;
           const prop = String(p.binaryPropertyName ?? "data");
           const dest = String(p.destinationKey ?? "data");
-          const data = item.binary?.[prop];
-          if (!data) throw new Error(`extractFromFile: no binary "${prop}"`);
+          const raw = item.binary?.[prop];
+          if (!raw) throw new Error(`extractFromFile: no binary "${prop}"`);
+          const data = binaryBuffer(raw);
           const operation = String(p.operation ?? "text");
           const value =
             operation === "binaryToPropery" || operation === "binaryToProperty"
@@ -376,5 +490,4 @@ export const n8nStepNode: NodeDef = {
       default:
         throw new Error(`n8n step type "${type}" has no native support yet`);
     }
-  },
-};
+}

@@ -10,6 +10,8 @@ export interface N8nWorkflow {
     type: string;
     parameters?: Record<string, unknown>;
     disabled?: boolean;
+    /** n8n's per-node failure policy — "continueErrorOutput" grants an error lane (branch 1). */
+    onError?: string;
   }>;
   connections?: Record<string, { main?: Array<Array<{ node: string; index?: number }>> }>;
 }
@@ -53,6 +55,7 @@ export function importN8nWorkflow(wf: N8nWorkflow): ImportResult {
         n8nName: n.name,
         parameters: n.parameters ?? {},
         __flow: flowSlug,
+        ...(n.onError === "continueErrorOutput" ? { __errorOutput: true } : {}),
       },
     });
   });

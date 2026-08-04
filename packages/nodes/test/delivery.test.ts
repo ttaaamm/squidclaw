@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
-import { clearNodes, registerNode, executeGraph, Journal } from "@squidclaw/kernel";
+import { binaryBuffer, clearNodes, registerNode, executeGraph, Journal } from "@squidclaw/kernel";
 import { telegramSendNode, gotenbergRenderNode } from "@squidclaw/nodes";
 
 /** One fake world: pretends to be both Telegram's API and Gotenberg. */
@@ -82,7 +82,7 @@ describe("gotenberg.render", () => {
     expect(received[0].url).toBe("/forms/chromium/convert/html");
     expect(received[0].body.toString("latin1")).toContain('filename="index.html"');
     expect(out[0].json).toMatchObject({ filename: "invoice.pdf", kind: "pdf" });
-    expect(out[0].binary!.data.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(binaryBuffer(out[0].binary!.data).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });
 

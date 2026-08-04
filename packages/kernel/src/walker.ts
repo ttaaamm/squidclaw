@@ -45,6 +45,20 @@ export async function executeGraph(
       ? incoming.flatMap((e) => outputs.get(e.from)?.[e.branch ?? 0] ?? [])
       : (opts.seedItems ?? []);
     const startedAt = new Date().toISOString();
+
+    // n8n's cardinal rule: a node that receives no items does not run.
+    // Without this, the branches a Switch did NOT choose still execute —
+    // reading files, calling APIs — and can crash a path the conversation
+    // never took. Roots are exempt: they run on the seed.
+    if (incoming.length && input.length === 0) {
+      outputs.set(nodeId, [[]]);
+      opts.journal.recordStep(execId, {
+        nodeId, node: gn.node, params: gn.params, input: [], output: [],
+        status: "skipped", startedAt, finishedAt: startedAt,
+      });
+      continue;
+    }
+
     try {
       if (!def) throw new Error(`Unknown node type: ${gn.node}`);
       const result = await def.run(gn.params, input, {

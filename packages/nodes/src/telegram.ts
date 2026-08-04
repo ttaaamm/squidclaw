@@ -1,4 +1,4 @@
-import type { Item, NodeDef } from "@squidclaw/kernel";
+import { binaryBuffer, type Item, type NodeDef } from "@squidclaw/kernel";
 
 export interface TelegramSendOptions {
   /** Overridable for tests; defaults to the real Bot API. */
@@ -32,7 +32,8 @@ export function telegramSendNode(opts: TelegramSendOptions = {}): NodeDef {
       if (!token) throw new Error("telegram.send: TELEGRAM_BOT_TOKEN missing");
       const api = `${opts.apiRoot ?? "https://api.telegram.org"}/bot${token}`;
 
-      const binary = items.find((i) => i.binary?.data)?.binary?.data;
+      const raw = items.find((i) => i.binary?.data)?.binary?.data;
+      const binary = raw === undefined ? undefined : binaryBuffer(raw);
 
       if (params.filename && binary) {
         const filename = String(params.filename).toLowerCase();

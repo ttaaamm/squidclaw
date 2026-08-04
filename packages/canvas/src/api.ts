@@ -35,7 +35,7 @@ export interface ExecutionDetail extends ExecutionSummary {
     id: string;
     node: string;
     params: Record<string, unknown>;
-    status?: "ok" | "error";
+    status?: "ok" | "error" | "skipped";
     error?: string;
     input?: unknown[];
     output?: unknown[];

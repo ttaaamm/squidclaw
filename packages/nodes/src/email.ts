@@ -1,4 +1,4 @@
-import type { NodeDef } from "@squidclaw/kernel";
+import { binaryBuffer, type NodeDef } from "@squidclaw/kernel";
 
 export interface EmailConfig {
   user: string;
@@ -108,7 +108,8 @@ export function emailSendNode(transport: SendTransport = realSend, env = process
     run: async (params, items) => {
       const config = emailConfigFromEnv(env);
       if (!config) throw new Error(NO_EARS);
-      const binary = items.find((i) => i.binary?.data)?.binary?.data;
+      const raw = items.find((i) => i.binary?.data)?.binary?.data;
+      const binary = raw === undefined ? undefined : binaryBuffer(raw);
       await transport(config, {
         to: String(params.to),
         subject: String(params.subject),
