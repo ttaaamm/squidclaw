@@ -51,14 +51,16 @@ async function main() {
     },
   }];
 
+  // With real keys on disk, this walks the WHOLE pipeline: text written by
+  // Claude, image generated, Gotenberg render, archive, send — all to the
+  // fake Telegram. Skip /setkey so the stored keys stay untouched.
   const script = [
-    "/setkey",                          // usage line
-    "/setkey anthropic sk-dummy-key",   // Store Key writes the file, deletes the message
     "/post",                            // size question
     "1",                                // → title question
-    "Dry Run Headline",                 // → topic question
-    "Test of the reborn dialect",       // → image question
-    "2",                                // generate → gentext leg → 401 → error lane
+    "The dialect speaks n8n now",       // → topic question
+    "SquidClaw learned to run n8n workflows natively, first try after seven bug fixes", // → image question
+    "2",                                // generate → gentext leg (real Claude)
+    "ok",                               // approve → render leg (image, Gotenberg, send)
   ];
 
   for (const text of script) {
