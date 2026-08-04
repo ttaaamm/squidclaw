@@ -735,6 +735,15 @@ if (sub === "scopes") {
       else warn("key store exists but is empty");
     } catch { warn("no social key store (fine unless flows need AI keys)"); }
 
+    // Ears: local model first-class; API keys second; deafness named.
+    if (process.env.SQUIDCLAW_WHISPER_BIN && process.env.SQUIDCLAW_WHISPER_MODEL) {
+      if (existsSync(process.env.SQUIDCLAW_WHISPER_BIN) && existsSync(process.env.SQUIDCLAW_WHISPER_MODEL)) {
+        ok("ears: built-in (local whisper)");
+      } else warn("ears configured but binary/model missing — rerun scripts/install-ears.sh");
+    } else if (process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY) {
+      ok("ears: via API key");
+    } else warn("no ears — bash scripts/install-ears.sh grows built-in ones");
+
     if (process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID) ok("instagram connected");
     else lines.push("◦ instagram not connected (INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_ACCOUNT_ID)");
 
