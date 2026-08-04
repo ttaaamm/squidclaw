@@ -119,7 +119,7 @@ describe("Code nodes speak full n8n", () => {
         { type: "n8n-nodes-base.code", __flow: "kf", parameters: { jsCode: `require('express'); return [];` } },
         [item({})], ctx,
       ),
-    ).rejects.toThrow(/only Node builtins/);
+    ).rejects.toThrow(/not allowed in Code steps/);
   });
 
   it("carries n8n binary envelopes with fileName through code mutations", async () => {

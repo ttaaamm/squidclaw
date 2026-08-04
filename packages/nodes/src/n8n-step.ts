@@ -174,10 +174,20 @@ async function runCode(
     $getWorkflowStaticData: (_scope?: string) => staticData,
     console: { log: () => {}, error: () => {}, warn: () => {} },
     JSON, Math, Date, Object, Array, String, Number, Boolean, Buffer,
-    // n8n's NODE_FUNCTION_ALLOW_BUILTIN, honored: imported Code nodes may
-    // require node builtins (fs, path, crypto…) — never node_modules.
+    // n8n's NODE_FUNCTION_ALLOW_BUILTIN, honored — but scoped: an allowlist
+    // of builtins, never node_modules, and never the escape hatches
+    // (child_process, worker_threads, vm, net…). Tighten or widen with
+    // SQUIDCLAW_CODE_BUILTINS.
     require: (name: string) => {
-      if (!isBuiltin(name)) throw new Error(`require("${name}"): only Node builtins are available in Code steps`);
+      const allowed = new Set(
+        (process.env.SQUIDCLAW_CODE_BUILTINS ??
+          "fs,path,os,crypto,url,querystring,buffer,util,zlib,stream,string_decoder,events,timers,assert")
+          .split(",").map((s) => s.trim()).filter(Boolean),
+      );
+      const bare = name.replace(/^node:/, "");
+      if (!isBuiltin(name) || !allowed.has(bare)) {
+        throw new Error(`require("${name}") is not allowed in Code steps — allowed builtins: ${[...allowed].join(", ")}`);
+      }
       return hostRequire(name);
     },
   };

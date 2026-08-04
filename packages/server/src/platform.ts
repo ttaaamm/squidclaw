@@ -9,8 +9,8 @@ import {
 } from "@squidclaw/memory";
 import { extractTextFromFile } from "@squidclaw/nodes";
 import {
-  Agent, FlowStore, VibeState, loadVibes,
-  answerHatching, beginHatching, birthAnnouncement, dream,
+  Agent, DEFAULT_POLICIES, FlowStore, VibeState, loadVibes,
+  answerHatching, beginHatching, birthAnnouncement, dream, scopePolicy,
   type ElicitRequest, type HatchState,
 } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, parseWhen, reminderNodes } from "@squidclaw/reflexes";
@@ -120,6 +120,9 @@ export class Platform {
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
       deep: this.opts.deep,
+      // Operator scopes: guarded organs (shell, ssh, email, publish) refuse
+      // unless this tenant holds the named grant. Founding tenants hold "*".
+      policies: [...DEFAULT_POLICIES, scopePolicy(tenant.scopes)],
       // Tools holding this tenant's data are private to this agent, never global:
       // memories, todo list, reminders, knowledge base, who's-who profiles.
       extraNodes: [
@@ -422,6 +425,16 @@ export class Platform {
             `${this.tenants.used(t.id, "thought")} thoughts today`,
         )
         .join("\n");
+    }
+
+if (sub === "scopes") {
+      const id = parts[2];
+      const list = parts[3];
+      if (!id || !list) return 'Usage: /tenant scopes <id> <csv|*>  — e.g. /tenant scopes ab12cd34 shell,email  (or *)';
+      const scopes = list === "*" ? ["*"] : list.split(",").map((x) => x.trim()).filter(Boolean);
+      if (!this.tenants.setScopes(id, scopes)) return `No tenant ${id}.`;
+      this.evictOrganism(id); // rebuilt with the new policy on next message
+      return `Scopes for ${id} are now: ${scopes.join(", ")}`;
     }
 
     if (sub === "new") {

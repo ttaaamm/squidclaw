@@ -66,6 +66,33 @@ export const placeholderPolicy: ToolPolicy = {
 export const DEFAULT_POLICIES: ToolPolicy[] = [placeholderPolicy];
 
 /**
+ * Operator scopes: the dangerous organs each need a named permission.
+ * A tenant without the scope gets a refusal that names the missing grant —
+ * the precondition for ever letting a stranger sign up.
+ */
+export const GUARDED_TOOLS: Record<string, string> = {
+  "shell.exec": "shell",
+  "ssh.exec": "ssh",
+  "email.send": "email",
+  "instagram.publish": "publish",
+};
+
+export function scopePolicy(scopes: string[] | undefined): ToolPolicy {
+  return {
+    name: "scopes",
+    before: (tool) => {
+      const needed = GUARDED_TOOLS[tool];
+      if (!needed) return;
+      // No scopes recorded, or "*": the founding-tenant reality — everything.
+      if (!scopes || scopes.includes("*") || scopes.includes(needed)) return;
+      throw new PolicyRefusal(
+        `${tool} needs the "${needed}" scope, which this account doesn't have. Tell the human an admin can grant it with /tenant scopes.`,
+      );
+    },
+  };
+}
+
+/**
  * The one place a tool actually runs. Both minds call through here — the
  * classic loop directly, the deep harness via the bridge — so a policy added
  * once holds everywhere.

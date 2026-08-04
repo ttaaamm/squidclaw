@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { clearNodes, registerNode, Journal, type Item } from "@squidclaw/kernel";
 import { registerBuiltinNodes } from "@squidclaw/nodes";
 import { Brains } from "@squidclaw/brains";
-import { Agent, executeTool, PolicyRefusal, type ToolPolicy } from "@squidclaw/agent";
+import { Agent, executeTool, GUARDED_TOOLS, PolicyRefusal, scopePolicy, type ToolPolicy } from "@squidclaw/agent";
 
 /**
  * The tool policy gate: one door every call walks through. Malformed and
@@ -89,5 +89,24 @@ describe("the gate inside the agent loop", () => {
     const [rec] = journal.list({ tenantId: "t1" });
     expect(rec.steps[0].status).toBe("error");
     expect(rec.steps[0].error).toContain('needs "target"');
+  });
+});
+
+describe("operator scopes", () => {
+
+  it("guarded tools refuse without the named grant — and say which one", () => {
+    const policy = scopePolicy(["email"]);
+    expect(() => policy.before!("ssh.exec", {})).toThrow(/"ssh" scope/);
+    expect(() => policy.before!("email.send", {})).not.toThrow();
+    expect(() => policy.before!("web.search", {})).not.toThrow(); // unguarded stays free
+  });
+
+  it("no scopes recorded, or *, means everything — the founding-tenant reality", () => {
+    for (const scopes of [undefined, ["*"]]) {
+      const policy = scopePolicy(scopes);
+      for (const tool of Object.keys(GUARDED_TOOLS)) {
+        expect(() => policy.before!(tool, {})).not.toThrow();
+      }
+    }
   });
 });

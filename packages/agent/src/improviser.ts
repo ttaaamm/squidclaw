@@ -4,6 +4,7 @@ import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
 import { flowNode, type ElicitRequest, type FlowStore } from "./flows.js";
 import { DEFAULT_POLICIES, executeTool, type ToolPolicy } from "./policy.js";
+import { compactRun } from "./compaction.js";
 import { crystallize, findRepeatedWork } from "./crystallizer.js";
 import { cleanReply, runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
 
@@ -48,6 +49,8 @@ export interface AgentOptions {
    * is calling. Defaults to the built-in set; supply more to tighten.
    */
   policies?: ToolPolicy[];
+  /** In-run transcript budget (chars); older tool rounds fold when exceeded. */
+  runBudgetChars?: number;
 }
 
 /** Context passed along with a run. */
@@ -480,7 +483,8 @@ export class Agent {
       role: t.role,
       content: t.content,
     }));
-    const messages: unknown[] = [...history, { role: "user", content }];
+    let messages: unknown[] = [...history, { role: "user", content }];
+    const runBudget = this.opts.runBudgetChars ?? 60_000;
 
     // Open for steering: messages arriving mid-run fold into this same turn.
     const inbox: string[] = [];
@@ -494,6 +498,8 @@ export class Agent {
           steered.push(extra);
           messages.push({ role: "user", content: extra });
         }
+        // A long task folds its oldest tool rounds instead of drowning in them.
+        messages = compactRun(messages, runBudget);
         onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",

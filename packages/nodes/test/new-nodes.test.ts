@@ -165,3 +165,16 @@ describe("the dialect's new types", () => {
     }
   });
 });
+
+describe("Code-step builtin allowlist", () => {
+  it("everyday builtins pass; escape hatches are refused by name", async () => {
+    const run = (code: string) =>
+      n8nStepNode.run({ type: "n8n-nodes-base.code", __flow: "sbx", parameters: { jsCode: code } }, [{ json: {} }], ctx);
+
+    const ok = await run("const p = require('path'); return [{ json: { joined: p.join('a','b') } }];");
+    expect(String(ok[0].json.joined)).toContain("a");
+
+    await expect(run("require('child_process'); return [];")).rejects.toThrow(/not allowed/);
+    await expect(run("require('node:worker_threads'); return [];")).rejects.toThrow(/not allowed/);
+  });
+});

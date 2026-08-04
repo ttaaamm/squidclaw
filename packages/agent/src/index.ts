@@ -7,3 +7,4 @@ export * from "./hatching.js";
 export * from "./deep.js";
 export * from "./policy.js";
 export * from "./dreaming.js";
+export * from "./compaction.js";

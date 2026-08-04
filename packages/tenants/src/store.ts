@@ -26,6 +26,8 @@ export interface Tenant {
   token: string;
   enabled: boolean;
   createdAt: string;
+  /** Operator scopes for guarded tools (shell, ssh, email, publish). Absent or ["*"] = everything. */
+  scopes?: string[];
 }
 
 /** Which conversation belongs to whom. One tenant may have many. */
@@ -55,6 +57,12 @@ export class TenantStore {
     // Migration: link tenants to an outside account system (e.g. Preplix/Supabase).
     try {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN external_id TEXT`);
+    } catch {
+      // column already exists
+    }
+    // Migration: operator scopes — which guarded tools a tenant may touch.
+    try {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN scopes TEXT`);
     } catch {
       // column already exists
     }
@@ -88,6 +96,7 @@ export class TenantStore {
     return {
       id: r.id as string, name: r.name as string, plan: r.plan as string,
       token: r.token as string, enabled: !!r.enabled, createdAt: r.created_at as string,
+      ...(r.scopes ? { scopes: JSON.parse(r.scopes as string) as string[] } : {}),
     };
   }
 
@@ -110,6 +119,13 @@ export class TenantStore {
     return (this.db.prepare(`SELECT * FROM tenants ORDER BY created_at`).all() as Record<string, unknown>[])
       .map((r) => this.row(r)!)
       .filter(Boolean);
+  }
+
+  /** Grant or replace a tenant's operator scopes (["*"] = everything). */
+  setScopes(tenantId: string, scopes: string[]): boolean {
+    return (
+      Number(this.db.prepare(`UPDATE tenants SET scopes = ? WHERE id = ?`).run(JSON.stringify(scopes), tenantId).changes) > 0
+    );
   }
 
   find(id: string): Tenant | undefined {
