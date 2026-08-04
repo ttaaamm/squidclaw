@@ -58,9 +58,18 @@ export class FlowStore {
 
   private read(dir: string, status: Flow["status"]): Flow[] {
     if (!existsSync(dir)) return [];
-    return readdirSync(dir)
-      .filter((f) => FLOW_FILE.test(f))
-      .map((f) => ({ ...(JSON.parse(readFileSync(join(dir, f), "utf8")) as Flow), status }));
+    const flows: Flow[] = [];
+    for (const f of readdirSync(dir).filter((f) => FLOW_FILE.test(f))) {
+      // One corrupt file must never take the whole platform down — a bad
+      // hand-edit here once crash-looped the service for every tenant.
+      // Skip it loudly; the rest of the body keeps working.
+      try {
+        flows.push({ ...(JSON.parse(readFileSync(join(dir, f), "utf8")) as Flow), status });
+      } catch (err) {
+        console.error(`flows: skipping unreadable ${join(dir, f)}: ${String(err)}`);
+      }
+    }
+    return flows;
   }
 
   drafts(): Flow[] {

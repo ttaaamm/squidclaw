@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { clearNodes, registerNode, Journal, type Graph } from "@squidclaw/kernel";
@@ -226,5 +226,20 @@ describe("the agent forms a habit on its own", () => {
     // And it doesn't nag about the same habit again.
     const third = await agent.handleMessage("fetch a third thing", "c1");
     expect(third).not.toContain("I've done this");
+  });
+});
+
+describe("a corrupt flow file", () => {
+  it("is skipped loudly — it must never take the whole store down", () => {
+    const d = dir();
+    const store = new FlowStore(d);
+    store.saveDraft({
+      name: "healthy", description: "", signature: "s", triggers: [], params: [],
+      runs: 0, createdAt: "now", status: "draft", graph: { nodes: [], edges: [] },
+    });
+    writeFileSync(join(d, "_drafts", "broken.flow.json"), '{"name": "broken", "desc');
+
+    const all = store.all(); // before the guard, this threw and crashed the platform
+    expect(all.map((f) => f.name)).toEqual(["healthy"]);
   });
 });
