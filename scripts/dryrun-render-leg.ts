@@ -70,6 +70,8 @@ async function main() {
   }
   const archived = rec.steps.find((s) => (s.params as any).n8nName === "Archive PNG");
   if (archived?.output?.[0]) console.log("archived:", (archived.output[0] as any).json.fileName);
+  const bem = rec.steps.find((s) => (s.params as any).n8nName === "Build Error Message");
+  if (bem?.input?.length) console.log("error item:", JSON.stringify((bem.input[0] as any).json).slice(0, 500));
   console.log("telegram calls:", sent.map((s) => s.method).join(", "));
   api.close();
 }
