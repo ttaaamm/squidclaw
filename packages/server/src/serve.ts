@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { listNodes } from "@squidclaw/kernel";
 import { registerBuiltinNodes } from "@squidclaw/nodes";
 import { loadPlugins } from "@squidclaw/sdk";
-import { Journal, registerNode } from "@squidclaw/kernel";
+import { Journal, getNode, registerNode } from "@squidclaw/kernel";
 import { FlowStore } from "@squidclaw/agent";
 import { ReflexStore } from "@squidclaw/reflexes";
 import { SemanticMemory } from "@squidclaw/memory";
@@ -68,8 +68,18 @@ const platform = new Platform({
   },
 });
 
-surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, (chatId, text, progress) =>
-  platform.handle("telegram", chatId, text, progress),
+surface = new TelegramSurface(
+  process.env.TELEGRAM_BOT_TOKEN!,
+  (chatId, text, progress) => platform.handle("telegram", chatId, text, progress),
+  {
+    // Voice notes become words before the mind wakes — one thinking turn.
+    transcribe: async (path) => {
+      const ears = getNode("audio.transcribe");
+      if (!ears) throw new Error("no ears registered");
+      const out = await ears.run({ path }, [], { tenantId: "surface" });
+      return String(out[0]?.json?.text ?? "");
+    },
+  },
 );
 await surface.start();
 for (const pluginSurface of loadedPlugins.surfaces) await pluginSurface.start();

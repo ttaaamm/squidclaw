@@ -132,12 +132,26 @@ export function voiceSayNode(
  * included, for the price of a few CPU seconds.
  */
 async function localWhisper(audioPath: string): Promise<string> {
-  const bin = process.env.SQUIDCLAW_WHISPER_BIN!;
-  const model = process.env.SQUIDCLAW_WHISPER_MODEL!;
-  const run = promisify(execFile);
   const wav = join(tmpdir(), `sq-hear-${Date.now().toString(36)}.wav`);
   try {
     await run("ffmpeg", ["-y", "-i", audioPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], { timeout: 60_000 });
+
+    // The hot server first: model already in RAM, answers in a breath.
+    const url = process.env.SQUIDCLAW_WHISPER_URL;
+    if (url) {
+      const form = new FormData();
+      form.append("file", new Blob([new Uint8Array(readFileSync(wav))]), "audio.wav");
+      form.append("response_format", "json");
+      const res = await fetch(`${url}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
+      if (res.ok) {
+        const text = ((await res.json()) as { text?: string }).text?.trim();
+        if (text) return text;
+      }
+      // fall through to the cold binary — slower, but never deaf
+    }
+
+    const bin = process.env.SQUIDCLAW_WHISPER_BIN!;
+    const model = process.env.SQUIDCLAW_WHISPER_MODEL!;
     const { stdout } = await run(bin, ["-m", model, "-f", wav, "-l", "auto", "-nt", "--no-prints"], {
       timeout: 180_000, maxBuffer: 4 * 1024 * 1024,
     });

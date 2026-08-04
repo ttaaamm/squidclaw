@@ -123,3 +123,48 @@ describe("telegram surface", () => {
     expect(String(messages[0].payload.text)).toContain("⚠️");
   });
 });
+
+describe("voice notes heard at the surface", () => {
+  it("transcribes before the mind wakes — the handler receives words", async () => {
+    const asked: string[] = [];
+    const surface = make(async (_c, text) => { asked.push(text); return "answered"; }, {
+      download: async (_id, dest) => dest,
+      transcribe: async () => "وينك؟ اتصل فيني",
+    });
+    capture(surface);
+
+    await surface.bot.handleUpdate({
+      update_id: 2,
+      message: {
+        message_id: 11, date: 0,
+        chat: { id: 77, type: "private", first_name: "T" },
+        from: { id: 77, is_bot: false, first_name: "T" },
+        voice: { file_id: "v1", file_unique_id: "u1", duration: 2 },
+      },
+    } as never);
+
+    expect(asked[0]).toContain("🎙️");
+    expect(asked[0]).toContain("وينك؟ اتصل فيني");
+  });
+
+  it("a deaf moment falls back to the agent's own ears", async () => {
+    const asked: string[] = [];
+    const surface = make(async (_c, text) => { asked.push(text); return "ok"; }, {
+      download: async (_id, dest) => dest,
+      transcribe: async () => { throw new Error("server down"); },
+    });
+    capture(surface);
+
+    await surface.bot.handleUpdate({
+      update_id: 3,
+      message: {
+        message_id: 12, date: 0,
+        chat: { id: 77, type: "private", first_name: "T" },
+        from: { id: 77, is_bot: false, first_name: "T" },
+        voice: { file_id: "v2", file_unique_id: "u2", duration: 2 },
+      },
+    } as never);
+
+    expect(asked[0]).toContain("audio.transcribe");
+  });
+});

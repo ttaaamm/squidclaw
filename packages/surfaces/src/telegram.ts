@@ -15,6 +15,13 @@ export interface TelegramSurfaceOptions {
   mediaDir?: string;
   /** Injectable download for tests. */
   download?: (fileId: string, dest: string) => Promise<string>;
+  /**
+   * Hear a voice note BEFORE the mind wakes: the surface transcribes and
+   * hands the agent plain words — one thinking turn instead of two. When
+   * absent (or failing), the old path remains: the agent is told where the
+   * audio lives and reaches for its own ears.
+   */
+  transcribe?: (path: string) => Promise<string>;
 }
 
 /** Telegram's typing indicator lives ~5s; refresh it a little faster than that. */
@@ -62,6 +69,14 @@ export class TelegramSurface implements ChatSurface {
       this.handleWith(ctx, async () => {
         const media = ctx.message.voice ?? ctx.message.audio!;
         const path = await this.download(media.file_id, join(this.mediaDir, `${media.file_unique_id}.ogg`));
+        // Hear first, think once: transcribe at the surface so the mind
+        // receives words, not homework.
+        if (opts.transcribe) {
+          try {
+            const heard = await opts.transcribe(path);
+            if (heard.trim()) return `🎙️ (a voice note — they said): ${heard.trim()}`;
+          } catch { /* deaf moment — fall back to the agent's own ears */ }
+        }
         return `[The human sent a voice note. It is saved at ${path} — use audio.transcribe to hear it, then answer what they said.]`;
       }),
     );

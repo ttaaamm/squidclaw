@@ -26,7 +26,7 @@ fi
 
 cd "$DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release >/dev/null
-cmake --build build -j "$(nproc)" --target whisper-cli
+cmake --build build -j "$(nproc)" --target whisper-cli --target whisper-server
 sh ./models/download-ggml-model.sh "$MODEL"
 chmod -R a+rX "$DIR"
 
@@ -38,3 +38,6 @@ echo ""
 echo "Add to your .env, then restart the service:"
 echo "  SQUIDCLAW_WHISPER_BIN=$DIR/build/bin/whisper-cli"
 echo "  SQUIDCLAW_WHISPER_MODEL=$DIR/models/ggml-$MODEL.bin"
+echo ""
+echo "For instant hearing, run whisper-server as a service (model stays hot) and add:"
+echo "  SQUIDCLAW_WHISPER_URL=http://127.0.0.1:8321"
