@@ -77,6 +77,19 @@ describe("dreaming", () => {
     expect(report?.forgotten).toBeLessThanOrEqual(5); // the cap held
   });
 
+  it("REM: one non-obvious connection lands in the diary as a dream", async () => {
+    const { memory, diary } = mindWith(EIGHT);
+    let call = 0;
+    const mind = new Brains({ tiers: { cheap: ["m"], strong: ["m"] } }, async () =>
+      says(++call === 1
+        ? '{"merges":[],"forget":[]}'
+        : '{"insight":"Riyad Bank facts keep coming up — the human likely works with them."}'),
+    );
+    const report = await dream(memory, mind, diary);
+    expect(report?.insight).toContain("Riyad Bank");
+    expect(readFileSync(diary, "utf8")).toContain("💡 dreamt: Riyad Bank facts keep coming up");
+  });
+
   it("a failing brain means a dreamless night, nothing lost", async () => {
     const { memory, diary } = mindWith(EIGHT);
     const broken = new Brains({ tiers: { cheap: ["m"], strong: ["m"] } }, async () => {

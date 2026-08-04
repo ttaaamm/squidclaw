@@ -34,6 +34,8 @@ export interface DreamReport {
   merged: number;
   forgotten: number;
   kept: number;
+  /** REM: one non-obvious connection the sleeping mind noticed, if any. */
+  insight?: string;
 }
 
 export interface DreamOptions {
@@ -118,6 +120,31 @@ export async function dream(
       }
     }
 
+    // REM: with the pile tidied, one creative pass — a single non-obvious
+    // connection between memories, the kind a sleeping mind makes. Never
+    // required, never repeated verbatim, always written down.
+    let insight: string | undefined;
+    try {
+      const rem = await mind.complete({
+        tier: "cheap",
+        system:
+          "You are a mind in REM sleep, looking at its own memories. Name ONE non-obvious connection, pattern, or " +
+          'gentle observation across them — a single useful sentence. Reply ONLY JSON: {"insight":"..."} or {"insight":null}. ' +
+          "No restating a single memory; an insight must join at least two.",
+        messages: [{ role: "user", content: memory.all().map((m) => `- ${m.name}: ${m.content.replace(/\s+/g, " ").slice(0, 200)}`).join("\n") }],
+        maxTokens: 200,
+      });
+      const s = rem.text.indexOf("{");
+      const e = rem.text.lastIndexOf("}");
+      if (s !== -1 && e > s) {
+        const parsed = JSON.parse(rem.text.slice(s, e + 1)) as { insight?: string | null };
+        if (parsed.insight && typeof parsed.insight === "string") {
+          insight = parsed.insight.trim();
+          diary.push(`- 💡 dreamt: ${insight}`);
+        }
+      }
+    } catch { /* REM is a luxury even among luxuries */ }
+
     const kept = memory.all().length;
     if (diary.length) {
       appendFileSync(
@@ -126,7 +153,7 @@ export async function dream(
         "utf8",
       );
     }
-    return { collapsed, merged, forgotten, kept };
+    return { collapsed, merged, forgotten, kept, ...(insight ? { insight } : {}) };
   } catch {
     return undefined; // a dreamless night, never an error
   }

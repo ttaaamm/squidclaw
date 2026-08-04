@@ -193,6 +193,16 @@ export function handleCommand(input: string, ctx: Booted, chatId: string): strin
     return `Promoted **${arg}**. I'll run it directly from now on${added.length ? ` (available as ${added.join(", ")})` : ""}.`;
   }
 
+  if (cmd === "/dreams") {
+    const diaryPath = join(ctx.workspace, "DREAMS.md");
+    if (!existsSync(diaryPath)) {
+      return "No dreams yet — my mind is still small. Keep talking to me; when there's enough to sleep on, the diary starts itself.";
+    }
+    const diary = readFileSync(diaryPath, "utf8").trim();
+    const nights = diary.split(/\n(?=## )/);
+    return `🌙 My dream diary (latest first):\n\n${nights.slice(-3).reverse().join("\n")}`;
+  }
+
   if (cmd === "/reflexes") {
     const all = ctx.reflexes.all();
     if (!all.length) return "No reflexes yet. Add one with /reflex <name> <habit> <cron…>";
