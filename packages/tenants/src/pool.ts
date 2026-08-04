@@ -39,6 +39,11 @@ export class AgentPool<T> {
     return built;
   }
 
+  /** The warm instance if one exists — never builds. For steering peeks. */
+  peek(tenantId: string): T | undefined {
+    return this.live.get(tenantId);
+  }
+
   /** Drops a tenant's warm instance — call after changing its plan or workspace. */
   evict(tenantId: string): void {
     this.live.delete(tenantId);

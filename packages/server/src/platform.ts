@@ -451,7 +451,53 @@ export class Platform {
     return "Usage: /tenants · /tenant new <name> [plan] · /tenant plan <id> <plan> · /tenant on|off <id> · /tenant token <id>";
   }
 
+  /**
+   * The session lane. One run per chat at a time — two rapid messages must
+   * never race each other into the journal or produce dueling replies.
+   *
+   * A message that arrives mid-run is first offered to the active run as
+   * steering (the classic mind folds it into the same turn and answers both
+   * at once); if the run can't take it, the message waits its turn as a
+   * follow-up. Escape hatches — /cancel and /flow — jump the queue, because
+   * "stop" must never stand in line behind the thing it's stopping.
+   */
+  private laneTail = new Map<string, Promise<string>>();
+
   async handle(
+    surface: string,
+    chatId: string,
+    text: string,
+    progress?: (note: string) => void,
+  ): Promise<string> {
+    const trimmed = text.trim();
+    const lane = `${surface}:${chatId}`;
+    const busy = this.laneTail.has(lane);
+
+    if (busy && (trimmed === "/cancel" || trimmed.startsWith("/flow"))) {
+      return this.handleTurn(surface, chatId, text, progress);
+    }
+
+    if (busy && !trimmed.startsWith("/")) {
+      const tenant = this.tenants.tenantFor(surface, chatId);
+      if (tenant) {
+        const organism = this.pool.peek(tenant.id);
+        if (organism?.agent.acceptSteer(chatId, text)) return ""; // absorbed into the active turn
+      }
+    }
+
+    const tail = this.laneTail.get(lane) ?? Promise.resolve("");
+    const run = tail
+      .catch(() => "")
+      .then(() => this.handleTurn(surface, chatId, text, progress));
+    this.laneTail.set(lane, run);
+    try {
+      return await run;
+    } finally {
+      if (this.laneTail.get(lane) === run) this.laneTail.delete(lane);
+    }
+  }
+
+  private async handleTurn(
     surface: string,
     chatId: string,
     text: string,

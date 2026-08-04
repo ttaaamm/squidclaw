@@ -96,6 +96,22 @@ export class Agent {
    */
   private habits = new Map<string, NodeDef>();
 
+  /**
+   * Steering: messages that arrive while a classic run is thinking get
+   * folded into that same turn — one train of thought answering everything,
+   * instead of a second run racing the first. Only the classic loop can
+   * absorb them (the deep harness is a sealed process); others say no and
+   * the platform queues the message as a follow-up.
+   */
+  private steerInboxes = new Map<string, string[]>();
+
+  acceptSteer(chatId: string, text: string): boolean {
+    const inbox = this.steerInboxes.get(chatId);
+    if (!inbox) return false;
+    inbox.push(text);
+    return true;
+  }
+
   constructor(private opts: AgentOptions) {
     this.registerHabits();
   }
@@ -438,8 +454,18 @@ export class Agent {
     }));
     const messages: unknown[] = [...history, { role: "user", content }];
 
+    // Open for steering: messages arriving mid-run fold into this same turn.
+    const inbox: string[] = [];
+    this.steerInboxes.set(chatId, inbox);
+    const steered: string[] = [];
+
     try {
       for (let turn = 0; turn < MAX_TURNS; turn++) {
+        while (inbox.length) {
+          const extra = inbox.shift()!;
+          steered.push(extra);
+          messages.push({ role: "user", content: extra });
+        }
         onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",
@@ -528,10 +554,30 @@ export class Agent {
         reply = cleanReply(final.text);
       }
 
+      // Close the steering window, then answer anything that slipped in
+      // during the final thought — accepted messages must never go unheard.
+      this.steerInboxes.delete(chatId);
+      if (inbox.length) {
+        messages.push({ role: "assistant", content: reply || "…" });
+        while (inbox.length) {
+          const extra = inbox.shift()!;
+          steered.push(extra);
+          messages.push({ role: "user", content: extra });
+        }
+        onProgress?.("answering your follow-up too…");
+        const more = await brains.complete({
+          tier: "strong",
+          system: this.systemPrompt(chatId, meta?.surface),
+          messages,
+        });
+        reply = [reply, cleanReply(more.text)].filter(Boolean).join("\n\n");
+      }
+
       journal.setGraph(execId, graph);
       journal.finish(execId, "ok");
       reply = reply || "I did the work but couldn't wrap it into an answer — the journal has the details.";
       conversation?.append(tenantId, chatId, "user", text);
+      for (const extra of steered) conversation?.append(tenantId, chatId, "user", extra);
       conversation?.append(tenantId, chatId, "assistant", reply);
       this.extractFacts(text, reply); // fire-and-forget: the passive ear
       this.updateSummary(chatId); // fire-and-forget: the rolling memory of this chat
@@ -546,6 +592,8 @@ export class Agent {
       journal.setGraph(execId, graph);
       journal.finish(execId, "error");
       return `Something went wrong: ${String(err)}`;
+    } finally {
+      if (this.steerInboxes.get(chatId) === inbox) this.steerInboxes.delete(chatId);
     }
   }
 }
