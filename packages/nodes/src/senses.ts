@@ -46,16 +46,51 @@ export function visionLookNode(
 }
 
 /**
- * Voice — speak a reply aloud via Microsoft Edge's free TTS (the same engine
- * legacy uses). Produces an mp3 that telegram.send can deliver as a voice note.
+ * The built-in mouth: Piper, a local neural voice — no API, no cloud, the
+ * sound is made on this machine. Arabic text picks the Arabic voice by its
+ * own script; everything else speaks English. Piper emits WAV; ffmpeg
+ * reshapes it to whatever extension the caller asked for.
+ */
+async function localSpeak(text: string, outPath: string, wanted?: string): Promise<string> {
+  const bin = process.env.SQUIDCLAW_PIPER_BIN!;
+  const ar = process.env.SQUIDCLAW_PIPER_VOICE_AR;
+  const en = process.env.SQUIDCLAW_PIPER_VOICE_EN;
+  const arabic = wanted === "ar" || (wanted !== "en" && /[؀-ۿ]/.test(text));
+  const model = (arabic ? ar : en) ?? en ?? ar;
+  if (!model) throw new Error("voice.say: no local voice models configured");
+
+  const wav = outPath.endsWith(".wav") ? outPath : join(tmpdir(), `sq-say-${Date.now().toString(36)}.wav`);
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = execFile(bin, ["-m", model, "-f", wav, "-q"], { timeout: 120_000 }, (err) =>
+      err ? reject(err) : resolvePromise(),
+    );
+    child.stdin?.write(text);
+    child.stdin?.end();
+  });
+  if (wav !== outPath) {
+    try {
+      await run("ffmpeg", ["-y", "-i", wav, outPath], { timeout: 60_000 });
+    } finally {
+      rmSync(wav, { force: true });
+    }
+  }
+  return arabic ? "piper-ar" : "piper-en";
+}
+
+/**
+ * Voice — speak a reply aloud. Built-in Piper first (local, free, offline);
+ * Microsoft Edge's free TTS remains as the cloud fallback.
  */
 export function voiceSayNode(
   synthesize?: (text: string, outPath: string, voice: string) => Promise<void>,
+  local: (text: string, outPath: string, wanted?: string) => Promise<string> = localSpeak,
 ): NodeDef {
   return {
     name: "voice.say",
     description:
-      "Turn text into spoken audio (mp3). Params: text (required), path (where to save, required), voice (optional; e.g. en-US-GuyNeural, ar-SA-HamedNeural — Arabic works). Chain telegram.send with the filename to deliver it as a voice note.",
+      "Turn text into spoken audio — Arabic and English both speak naturally. Params: text (required), " +
+      "path (where to save — use .ogg for a Telegram voice note, required), voice (optional: 'ar' or 'en' to force " +
+      "a language; otherwise the text's own script decides). Chain telegram.send with the filename to deliver it.",
     inputSchema: {
       type: "object",
       required: ["text", "path"],
@@ -64,14 +99,19 @@ export function voiceSayNode(
     run: async (params) => {
       const outPath = resolve(String(params.path));
       mkdirSync(dirname(outPath), { recursive: true });
-      const voice = String(params.voice ?? "en-US-GuyNeural");
+      let voice = String(params.voice ?? "auto");
 
       if (synthesize) {
         await synthesize(String(params.text), outPath, voice);
+      } else if (process.env.SQUIDCLAW_PIPER_BIN) {
+        // The built-in mouth: costs nothing, tells no one.
+        voice = await local(String(params.text), outPath, params.voice ? String(params.voice) : undefined);
       } else {
+        const edgeVoice = voice === "ar" ? "ar-SA-HamedNeural" : voice === "en" || voice === "auto" ? "en-US-GuyNeural" : voice;
         const { EdgeTTS } = await import("node-edge-tts");
-        const tts = new EdgeTTS({ voice, outputFormat: "audio-24khz-48kbitrate-mono-mp3" });
+        const tts = new EdgeTTS({ voice: edgeVoice, outputFormat: "audio-24khz-48kbitrate-mono-mp3" });
         await tts.ttsPromise(String(params.text), outPath);
+        voice = edgeVoice;
       }
 
       const audio = readFileSync(outPath);

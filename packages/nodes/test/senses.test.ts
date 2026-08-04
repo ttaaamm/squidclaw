@@ -152,3 +152,24 @@ describe("built-in ears", () => {
     delete process.env.SQUIDCLAW_WHISPER_MODEL;
   });
 });
+
+describe("built-in mouth", () => {
+  it("prefers the local voice and picks Arabic by the text's own script", async () => {
+    process.env.SQUIDCLAW_PIPER_BIN = "/opt/piper/piper/piper";
+    const spoken: Array<{ text: string; wanted?: string }> = [];
+    const node = voiceSayNode(undefined, async (text, outPath, wanted) => {
+      spoken.push({ text, wanted });
+      writeFileSync(outPath, Buffer.from("fake-audio"));
+      return /[؀-ۿ]/.test(text) ? "piper-ar" : "piper-en";
+    });
+    const out = join(dir(), "reply.ogg");
+
+    const arabic = await node.run({ text: "أهلاً يا تامر", path: out }, [], { tenantId: "t" });
+    expect(arabic[0].json.voice).toBe("piper-ar");
+    const english = await node.run({ text: "hello there", path: out }, [], { tenantId: "t" });
+    expect(english[0].json.voice).toBe("piper-en");
+    expect(spoken).toHaveLength(2);
+
+    delete process.env.SQUIDCLAW_PIPER_BIN;
+  });
+});

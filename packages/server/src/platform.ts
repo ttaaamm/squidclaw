@@ -744,6 +744,11 @@ if (sub === "scopes") {
       ok("ears: via API key");
     } else warn("no ears — bash scripts/install-ears.sh grows built-in ones");
 
+    if (process.env.SQUIDCLAW_PIPER_BIN) {
+      if (existsSync(process.env.SQUIDCLAW_PIPER_BIN)) ok("voice: built-in (local piper)");
+      else warn("voice configured but piper binary missing — rerun scripts/install-voice.sh");
+    } else warn("voice via cloud fallback — bash scripts/install-voice.sh grows a built-in one");
+
     if (process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID) ok("instagram connected");
     else lines.push("◦ instagram not connected (INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_ACCOUNT_ID)");
 
