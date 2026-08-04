@@ -129,3 +129,26 @@ describe("canvas.snap + photo delivery", () => {
     expect(received.at(-1)!.url).toBe("/bottkn/sendVoice");
   });
 });
+
+describe("built-in ears", () => {
+  it("prefers the local model when installed — no API, any language", async () => {
+    process.env.SQUIDCLAW_WHISPER_BIN = "/opt/whisper/build/bin/whisper-cli";
+    process.env.SQUIDCLAW_WHISPER_MODEL = "/opt/whisper/models/ggml-small.bin";
+    const heard: string[] = [];
+    const node = transcribeNode({
+      local: async (p) => { heard.push(p); return "مرحبا، هذا اختبار الأذن المحلية"; },
+      gemini: async () => { throw new Error("should not reach an API"); },
+      whisper: async () => { throw new Error("should not reach an API"); },
+    });
+    const dir = mkdtempSync(join(tmpdir(), "ears-"));
+    const voice = join(dir, "note.ogg");
+    writeFileSync(voice, Buffer.from("fake-ogg"));
+
+    const out = await node.run({ path: voice }, [], { tenantId: "t" });
+    expect(out[0].json).toMatchObject({ text: "مرحبا، هذا اختبار الأذن المحلية", ears: "local" });
+    expect(heard).toHaveLength(1);
+
+    delete process.env.SQUIDCLAW_WHISPER_BIN;
+    delete process.env.SQUIDCLAW_WHISPER_MODEL;
+  });
+});

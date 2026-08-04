@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import type { NodeDef } from "@squidclaw/kernel";
 
 const run = promisify(execFile);
@@ -84,12 +85,38 @@ export function voiceSayNode(
  * the same trick legacy uses) or OPENAI_API_KEY (whisper). Without either it
  * explains what's missing instead of pretending to hear.
  */
+/**
+ * Built-in ears, no API: whisper.cpp compiled on the box. ffmpeg reshapes
+ * whatever Telegram sends (ogg/opus) into the 16 kHz WAV the model wants,
+ * then the local binary listens — every language Whisper knows, Arabic
+ * included, for the price of a few CPU seconds.
+ */
+async function localWhisper(audioPath: string): Promise<string> {
+  const bin = process.env.SQUIDCLAW_WHISPER_BIN!;
+  const model = process.env.SQUIDCLAW_WHISPER_MODEL!;
+  const run = promisify(execFile);
+  const wav = join(tmpdir(), `sq-hear-${Date.now().toString(36)}.wav`);
+  try {
+    await run("ffmpeg", ["-y", "-i", audioPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], { timeout: 60_000 });
+    const { stdout } = await run(bin, ["-m", model, "-f", wav, "-l", "auto", "-nt", "--no-prints"], {
+      timeout: 180_000, maxBuffer: 4 * 1024 * 1024,
+    });
+    const text = stdout.trim();
+    if (!text) throw new Error("the local model heard nothing");
+    return text;
+  } finally {
+    rmSync(wav, { force: true });
+  }
+}
+
 export function transcribeNode(
   transports: {
     gemini?: (audio: Buffer, mime: string, key: string) => Promise<string>;
     whisper?: (audio: Buffer, filename: string, key: string) => Promise<string>;
+    local?: (audioPath: string) => Promise<string>;
   } = {},
 ): NodeDef {
+  const local = transports.local ?? localWhisper;
   const gemini =
     transports.gemini ??
     (async (audio: Buffer, mime: string, key: string) => {
@@ -137,14 +164,19 @@ export function transcribeNode(
   return {
     name: "audio.transcribe",
     description:
-      "Transcribe an audio file (voice note) to text. Params: path (audio file on disk, required). Needs GEMINI_API_KEY or OPENAI_API_KEY in the environment.",
+      "Transcribe an audio file (voice note) to text — any language, Arabic included. Params: path (audio file on disk, required).",
     inputSchema: { type: "object", required: ["path"], properties: { path: { type: "string" } } },
     run: async (params) => {
       const path = resolve(String(params.path));
       if (!existsSync(path)) throw new Error(`audio.transcribe: no file at ${path}`);
+
+      // Built-in ears first: the local model costs nothing and tells no one.
+      if (process.env.SQUIDCLAW_WHISPER_BIN && process.env.SQUIDCLAW_WHISPER_MODEL) {
+        return [{ json: { path, text: await local(path), ears: "local" } }];
+      }
+
       const audio = readFileSync(path);
       const mime = path.endsWith(".mp3") ? "audio/mp3" : path.endsWith(".wav") ? "audio/wav" : "audio/ogg";
-
       if (process.env.GEMINI_API_KEY) {
         return [{ json: { path, text: await gemini(audio, mime, process.env.GEMINI_API_KEY) } }];
       }
@@ -152,7 +184,7 @@ export function transcribeNode(
         return [{ json: { path, text: await whisper(audio, path.split(/[\\/]/).at(-1)!, process.env.OPENAI_API_KEY) } }];
       }
       throw new Error(
-        "I have no ears yet — add GEMINI_API_KEY (free at aistudio.google.com) or OPENAI_API_KEY to the environment",
+        "I have no ears yet — install the local model (SQUIDCLAW_WHISPER_BIN/MODEL), or add GEMINI_API_KEY / OPENAI_API_KEY",
       );
     },
   };
