@@ -9,7 +9,7 @@
  * Usage: npx tsx scripts/dryrun-formal-post.ts <flow.json>
  */
 import { createServer } from "node:http";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { executeGraph, Journal } from "@squidclaw/kernel";
@@ -17,60 +17,64 @@ import { registerBuiltinNodes } from "@squidclaw/nodes";
 
 const CHAT = 424242; // a fake operator — not a real chat id
 
-const sent: Array<{ method: string; body: any }> = [];
-const api = createServer((req, res) => {
-  let raw = "";
-  req.on("data", (c) => (raw += c));
-  req.on("end", () => {
-    const method = (req.url ?? "").split("/").pop() ?? "?";
-    let body: unknown = raw;
-    try { body = JSON.parse(raw); } catch { /* multipart */ }
-    sent.push({ method, body });
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+async function main() {
+  const sent: Array<{ method: string; body: any }> = [];
+  const api = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => {
+      const method = (req.url ?? "").split("/").pop() ?? "?";
+      let body: unknown = raw;
+      try { body = JSON.parse(raw); } catch { /* multipart */ }
+      sent.push({ method, body });
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, result: { message_id: 1 } }));
+    });
   });
-});
-await new Promise<void>((r) => api.listen(0, r));
-process.env.SQUIDCLAW_TELEGRAM_API = `http://127.0.0.1:${(api.address() as { port: number }).port}`;
-process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "dry-run-token";
-process.env.SQUIDCLAW_STATIC_DIR = mkdtempSync(join(tmpdir(), "dryrun-static-"));
+  await new Promise<void>((r) => api.listen(0, r));
+  process.env.SQUIDCLAW_TELEGRAM_API = `http://127.0.0.1:${(api.address() as { port: number }).port}`;
+  process.env.TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "dry-run-token";
+  process.env.SQUIDCLAW_STATIC_DIR = mkdtempSync(join(tmpdir(), "dryrun-static-"));
 
-registerBuiltinNodes();
-const flow = JSON.parse(await import("node:fs").then((fs) => fs.readFileSync(process.argv[2], "utf8")));
+  registerBuiltinNodes();
+  const flow = JSON.parse(readFileSync(process.argv[2], "utf8"));
 
-let updateId = 1000;
-const seed = (text: string) => [{
-  json: {
-    update_id: updateId++,
-    message: {
-      message_id: updateId, chat: { id: CHAT, type: "private" },
-      from: { id: CHAT, is_bot: false, first_name: "DryRun" },
-      date: Math.floor(Date.now() / 1000), text,
+  let updateId = 1000;
+  const seed = (text: string) => [{
+    json: {
+      update_id: updateId++,
+      message: {
+        message_id: updateId, chat: { id: CHAT, type: "private" },
+        from: { id: CHAT, is_bot: false, first_name: "DryRun" },
+        date: Math.floor(Date.now() / 1000), text,
+      },
     },
-  },
-}];
+  }];
 
-const script = [
-  "/setkey",                          // usage line
-  "/setkey anthropic sk-dummy-key",   // Store Key writes the file, deletes the message
-  "/post",                            // size question
-  "1",                                // → title question
-  "Dry Run Headline",                 // → topic question
-  "Test of the reborn dialect",       // → image question
-  "2",                                // generate → gentext leg → 401 → error lane
-];
+  const script = [
+    "/setkey",                          // usage line
+    "/setkey anthropic sk-dummy-key",   // Store Key writes the file, deletes the message
+    "/post",                            // size question
+    "1",                                // → title question
+    "Dry Run Headline",                 // → topic question
+    "Test of the reborn dialect",       // → image question
+    "2",                                // generate → gentext leg → 401 → error lane
+  ];
 
-for (const text of script) {
-  const before = sent.length;
-  const rec = await executeGraph(flow.graph, {
-    tenantId: "dry-run", kind: "flow", journal: new Journal(":memory:"), seedItems: seed(text),
-  });
-  const replies = sent.slice(before)
-    .map((s) => s.method === "sendMessage" ? `→ "${String(s.body?.text ?? "").split("\n")[0]}"` : `→ [${s.method}]`)
-    .join("  ");
-  const failed = rec.steps.find((s) => s.status === "error");
-  console.log(`you: ${text}`);
-  console.log(`   run=${rec.status}${failed ? ` FAILED at ${(failed.params as any).n8nName}: ${failed.error}` : ""}  ${replies}`);
+  for (const text of script) {
+    const before = sent.length;
+    const rec = await executeGraph(flow.graph, {
+      tenantId: "dry-run", kind: "flow", journal: new Journal(":memory:"), seedItems: seed(text),
+    });
+    const replies = sent.slice(before)
+      .map((s) => s.method === "sendMessage" ? `→ "${String(s.body?.text ?? "").split("\n")[0]}"` : `→ [${s.method}]`)
+      .join("  ");
+    const failed = rec.steps.find((s) => s.status === "error");
+    console.log(`you: ${text}`);
+    console.log(`   run=${rec.status}${failed ? ` FAILED at ${(failed.params as any).n8nName}: ${failed.error}` : ""}  ${replies}`);
+  }
+
+  api.close();
 }
 
-api.close();
+main();
