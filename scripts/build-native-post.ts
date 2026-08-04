@@ -36,9 +36,9 @@ function rewire(params: Record<string, any>, from: string, to: string): Record<s
 const composeCode = `
 const p = $input.first().json;
 const title = String(p.title || '').trim();
-const topic = String(p.topic || '').trim();
+// No separate topic given? The headline carries the story — write from it.
+const topic = String(p.topic || '').trim() || title;
 if (!title) throw new Error('I need a title (the headline) to make a post.');
-if (!topic) throw new Error('I need a topic — a sentence or two to write the copy from.');
 // "create tst post" is a request to USE this flow, not a headline. Refuse
 // placeholders outright — the refusal reaches the mind, which then has no
 // choice but to ask the human what the post is actually about.
@@ -144,7 +144,18 @@ const flow = {
     "Create and deliver a finished Saudi Times formal post card to the chat. Use whenever the human asks for a formal post, news card, or Saudi Times post. IMPORTANT: title and topic must be the actual SUBJECT of the post, in the human's own words. Phrases like 'test post', 'tst post', 'a post', 'try the flow' are requests to use this tool, NOT subjects — in those cases DO NOT call yet: ask the human what the post should be about (and optionally post or story size), wait for the answer, then call with their real headline. Never invent placeholder titles or topics. Params: title (the human's headline), topic (a sentence or two the copy is written from — if the human only gave a headline, use it as the topic too), size ('post' or 'story'; default 'post'). It drafts the copy, generates an editorial image, renders the branded card and sends it with its caption. After it runs, confirm briefly — the card itself arrives in the chat.",
   signature: "native:post",
   triggers: [],
-  params: ["title", "topic", "size"],
+  // The contract: the platform itself interviews the human for anything
+  // missing or placeholder-shaped. The mind can't forget to ask, and can't
+  // invent its way past the gate.
+  params: [
+    {
+      name: "title",
+      ask: "What should the post be about? Give me the headline.",
+      reject: "^(a\\s+)?(tst|test|demo|sample)(\\s*-?\\s*post)?$",
+    },
+    { name: "topic", default: "" },
+    { name: "size", options: ["post", "story"], default: "post" },
+  ],
   runs: 2,
   createdAt: new Date().toISOString(),
   status: "promoted",

@@ -2,7 +2,7 @@ import { getNode, listNodes, type Graph, type Item, type Journal, type NodeDef }
 import type { Mind, ToolSpec } from "@squidclaw/brains";
 import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
-import { flowNode, type FlowStore } from "./flows.js";
+import { flowNode, type ElicitRequest, type FlowStore } from "./flows.js";
 import { crystallize, findRepeatedWork } from "./crystallizer.js";
 import { cleanReply, runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
 
@@ -42,6 +42,17 @@ export interface AgentOptions {
    * time. Falls back to the classic loop if a deep run fails.
    */
   deep?: DeepOptions;
+}
+
+/** Context passed along with a run. */
+export interface RunMeta {
+  surface?: string;
+  /**
+   * Fired when a flow refused to run because the human still owes details.
+   * The platform turns this into its own deterministic interview — asking is
+   * a guarantee of the system, not a behavior we hope the model remembers.
+   */
+  onElicit?: (request: ElicitRequest) => void;
 }
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
@@ -284,7 +295,7 @@ export class Agent {
     text: string,
     chatId = "default",
     onProgress?: (note: string) => void,
-    meta?: { surface?: string },
+    meta?: RunMeta,
   ): Promise<string> {
     if (this.opts.deep) {
       try {
@@ -306,7 +317,7 @@ export class Agent {
     text: string,
     chatId: string,
     onProgress?: (note: string) => void,
-    meta?: { surface?: string },
+    meta?: RunMeta,
   ): Promise<string> {
     const { journal, tenantId, conversation } = this.opts;
     const deep = this.opts.deep!;
@@ -320,6 +331,7 @@ export class Agent {
       tools: this.available(),
       tenantId,
       onProgress,
+      onElicit: (request) => meta?.onElicit?.(request as ElicitRequest),
       onStep: (step) => {
         const nodeId = `n${++seq}`;
         graph.nodes.push({ id: nodeId, node: step.node, params: step.params });
@@ -378,7 +390,7 @@ export class Agent {
     text: string,
     chatId: string,
     onProgress?: (note: string) => void,
-    meta?: { surface?: string },
+    meta?: RunMeta,
   ): Promise<string> {
     const { brains, journal, tenantId, conversation } = this.opts;
     const tools: ToolSpec[] = this.available().map((n) => ({
@@ -441,6 +453,7 @@ export class Agent {
         }
         messages.push({ role: "assistant", content: res.assistantContent });
 
+        let elicit: ElicitRequest | undefined;
         const toolResults: unknown[] = [];
         for (const call of res.toolCalls) {
           const nodeName = toNodeName(call.name);
@@ -467,6 +480,14 @@ export class Agent {
             startedAt, finishedAt: new Date().toISOString(),
           });
 
+          // A flow that still needs the human's own details ends the model's
+          // turn right here — the platform runs the interview, not the model.
+          const request = (output[0]?.json as { __elicit?: ElicitRequest } | undefined)?.__elicit;
+          if (request) {
+            elicit = request;
+            break;
+          }
+
           // Context is for thinking, not dumping — a huge result gets a haircut.
           let resultContent = error ?? JSON.stringify(output.slice(0, 5).map((i) => i.json));
           if (resultContent.length > TOOL_RESULT_CHARS) {
@@ -479,6 +500,12 @@ export class Agent {
             content: resultContent,
           });
         }
+        if (elicit) {
+          meta?.onElicit?.(elicit);
+          reply = elicit.missing[0]?.ask ?? "I need a few more details first.";
+          break;
+        }
+
         messages.push({ role: "user", content: toolResults });
       }
 

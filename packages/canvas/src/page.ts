@@ -187,7 +187,7 @@ async function openHabit(name) {
     '<div class="canvas-wrap">' + svg(L, h.nodes) + '</div>' +
     '<div class="card"><div class="kv">' +
     '<span>learned from</span><b>' + h.runs + ' runs</b>' +
-    '<span>asks for</span><b>' + (h.params.length ? esc(h.params.join(', ')) : '—') + '</b>' +
+    '<span>asks for</span><b>' + (h.params.length ? esc(h.params.map(function (p) { return p && p.name ? p.name : p; }).join(', ')) : '—') + '</b>' +
     '<span>status</span><b>' + esc(h.status) + '</b></div></div>' +
     (h.triggers.length ? '<div class="card"><h3>What people said to ask for it</h3><pre>' +
       esc(h.triggers.join('\n')) + '</pre></div>' : '');

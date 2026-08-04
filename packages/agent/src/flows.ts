@@ -2,6 +2,26 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { join } from "node:path";
 import { executeGraph, type Graph, type Journal, type NodeDef } from "@squidclaw/kernel";
 
+/**
+ * A parameter contract. The plain-string form is a bare required param
+ * (what the crystallizer writes). The object form is a promise the platform
+ * enforces: when the value is missing — or matches `reject`, a placeholder —
+ * the PLATFORM asks the human `ask` and waits. The mind never has to
+ * remember to ask, and can never invent its way past the gate.
+ */
+export interface ParamSpec {
+  name: string;
+  /** The question the platform asks the human when this value is missing. */
+  ask?: string;
+  /** Allowed values; answers are matched case-insensitively. */
+  options?: string[];
+  /** Used when the value is absent — a param with a default is never asked. */
+  default?: string;
+  /** Values matching this regex (case-insensitive) are placeholders, treated as missing. */
+  reject?: string;
+}
+export type FlowParam = string | ParamSpec;
+
 /** A habit: work the agent did twice, frozen into something it can repeat exactly. */
 export interface Flow {
   name: string;
@@ -11,11 +31,77 @@ export interface Flow {
   /** What the human said the times this was improvised. */
   triggers: string[];
   /** Values that varied between runs, and so must be supplied each time. */
-  params: string[];
+  params: FlowParam[];
   graph: Graph;
   runs: number;
   createdAt: string;
   status: "draft" | "promoted";
+}
+
+/** Every param, in contract form — bare strings become required specs. */
+export function paramSpecs(flow: Flow): ParamSpec[] {
+  return (flow.params ?? []).map((p) => (typeof p === "string" ? { name: p } : p));
+}
+
+const isPlaceholder = (spec: ParamSpec, value: string): boolean =>
+  !!spec.reject && new RegExp(spec.reject, "i").test(value);
+
+const matchOption = (spec: ParamSpec, value: string): string | undefined =>
+  spec.options?.find((o) => o.toLowerCase() === value.toLowerCase());
+
+/**
+ * Which params the human still owes. Missing, empty, placeholder-shaped, or
+ * outside the declared options — unless a default covers the absence.
+ */
+export function missingParams(flow: Flow, args: Record<string, unknown>): ParamSpec[] {
+  return paramSpecs(flow).filter((spec) => {
+    const value = String(args[spec.name] ?? "").trim();
+    if (!value) return spec.default === undefined;
+    if (isPlaceholder(spec, value)) return true;
+    if (spec.options && !matchOption(spec, value)) return spec.default === undefined;
+    return false;
+  });
+}
+
+/** The final argument set: given values (normalized to options) plus defaults. */
+export function resolveArgs(flow: Flow, args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...args };
+  for (const spec of paramSpecs(flow)) {
+    const value = String(out[spec.name] ?? "").trim();
+    const bad = !value || isPlaceholder(spec, value) || (spec.options && !matchOption(spec, value));
+    if (bad) {
+      if (spec.default !== undefined) out[spec.name] = spec.default;
+    } else if (spec.options) {
+      out[spec.name] = matchOption(spec, value);
+    }
+  }
+  return out;
+}
+
+/** What a flow hands back instead of running when the human still owes details. */
+export interface ElicitRequest {
+  flow: string;
+  given: Record<string, unknown>;
+  missing: Array<{ name: string; ask: string; options?: string[] }>;
+}
+
+export function elicitFrom(flow: Flow, args: Record<string, unknown>): ElicitRequest | undefined {
+  const missing = missingParams(flow, args);
+  if (!missing.length) return undefined;
+  const given: Record<string, unknown> = {};
+  for (const spec of paramSpecs(flow)) {
+    if (missing.some((m) => m.name === spec.name)) continue;
+    if (args[spec.name] !== undefined) given[spec.name] = args[spec.name];
+  }
+  return {
+    flow: flow.name,
+    given,
+    missing: missing.map((m) => ({
+      name: m.name,
+      ask: m.ask ?? `What should I use for "${m.name}"?`,
+      ...(m.options ? { options: m.options } : {}),
+    })),
+  };
 }
 
 const PLACEHOLDER = /\{\{(\w+)\}\}/g;
@@ -121,18 +207,29 @@ export class FlowStore {
  * and running it is deterministic, no improvisation inside.
  */
 export function flowNode(flow: Flow, journal: Journal): NodeDef {
+  const specs = paramSpecs(flow);
   return {
     name: `flow.${flow.name}`,
     description: `[habit, learned from ${flow.runs} runs] ${flow.description}${
-      flow.params.length ? ` Params: ${flow.params.join(", ")}.` : ""
+      specs.length
+        ? ` Params: ${specs.map((p) => p.name).join(", ")}. Call with whatever the human actually said — if required details are missing, the platform will ask the human itself; never invent values.`
+        : ""
     }`,
     inputSchema: {
       type: "object",
-      required: flow.params,
-      properties: Object.fromEntries(flow.params.map((p) => [p, { type: "string" }])),
+      // Nothing is schema-required: an incomplete call triggers the platform's
+      // own interview instead of tempting the model to fill blanks with guesses.
+      required: [],
+      properties: Object.fromEntries(specs.map((p) => [p.name, { type: "string" }])),
     },
     run: async (params, _items, ctx) => {
-      const rec = await executeGraph(renderGraph(flow.graph, params), {
+      // The contract gate. Missing or placeholder-shaped values do not run
+      // the flow and do not throw — they hand back an elicitation request
+      // the platform turns into real questions to the real human.
+      const elicit = elicitFrom(flow, params);
+      if (elicit) return [{ json: { __elicit: elicit } as unknown as Record<string, unknown> }];
+
+      const rec = await executeGraph(renderGraph(flow.graph, resolveArgs(flow, params)), {
         tenantId: ctx.tenantId,
         kind: "flow",
         journal,

@@ -42,6 +42,8 @@ export function startToolBridge(opts: {
   tenantId: string;
   onStep: (step: BridgeStep) => void;
   onProgress?: (note: string) => void;
+  /** Fired when a flow declines to run until the human supplies details. */
+  onElicit?: (request: unknown) => void;
 }): Promise<ToolBridge> {
   const token = randomBytes(16).toString("hex");
   const byMcpName = new Map(opts.tools.map((t) => [toMcpName(t.name), t]));
@@ -81,6 +83,21 @@ export function startToolBridge(opts: {
                 node: tool.name, params: args ?? {}, output,
                 startedAt, finishedAt: new Date().toISOString(),
               });
+              // A flow that needs the human's own details: tell the platform
+              // (which runs its own interview) and tell the harness to stand
+              // down — the question is asked either way, guaranteed.
+              const elicit = (output[0]?.json as { __elicit?: unknown } | undefined)?.__elicit;
+              if (elicit) {
+                opts.onElicit?.(elicit as never);
+                send(200, {
+                  ok: true,
+                  result: [{
+                    stop: "The flow needs details only the human can give. The platform is asking them now — end your turn with EXACTLY this question and nothing else: " +
+                      String((elicit as { missing?: Array<{ ask?: string }> }).missing?.[0]?.ask ?? ""),
+                  }],
+                });
+                return;
+              }
               send(200, { ok: true, result: output.slice(0, 5).map((i) => i.json) });
             } catch (err) {
               opts.onStep({

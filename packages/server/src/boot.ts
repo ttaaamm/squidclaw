@@ -4,7 +4,7 @@ import { Journal } from "@squidclaw/kernel";
 import { extractTextFromFile, registerBuiltinNodes, registerMcpServers, type McpConfig } from "@squidclaw/nodes";
 import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains";
 import { ConversationStore, KnowledgeBase, Profiles, SemanticMemory, knowledgeNodes, profileNodes, registerMemoryNodes, taskList, taskNodes } from "@squidclaw/memory";
-import { Agent, FlowStore, VibeState, heal, loadVibes } from "@squidclaw/agent";
+import { Agent, FlowStore, VibeState, heal, loadVibes, paramSpecs, type Flow } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, WebhookServer, reminderNodes } from "@squidclaw/reflexes";
 import { listNodes, type ExecutionRecord } from "@squidclaw/kernel";
 
@@ -174,8 +174,10 @@ export function handleCommand(input: string, ctx: Booted, chatId: string): strin
     const promoted = flows.promoted();
     const drafts = flows.drafts();
     if (!promoted.length && !drafts.length) return "No habits yet — I'm still improvising everything.";
-    const line = (f: { name: string; runs: number; params: string[] }) =>
-      `  ${f.name} (${f.runs} runs${f.params.length ? `, needs ${f.params.join(", ")}` : ""})`;
+    const line = (f: Flow) => {
+      const names = paramSpecs(f).map((p) => p.name);
+      return `  ${f.name} (${f.runs} runs${names.length ? `, needs ${names.join(", ")}` : ""})`;
+    };
     return [
       promoted.length ? `Habits I run without thinking:\n${promoted.map(line).join("\n")}` : "",
       drafts.length ? `Waiting on your yes (/promote <name>):\n${drafts.map(line).join("\n")}` : "",

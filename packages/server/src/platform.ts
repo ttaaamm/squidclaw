@@ -10,7 +10,8 @@ import {
 import { extractTextFromFile } from "@squidclaw/nodes";
 import {
   Agent, FlowStore, VibeState, loadVibes,
-  answerHatching, beginHatching, birthAnnouncement, type HatchState,
+  answerHatching, beginHatching, birthAnnouncement,
+  type ElicitRequest, type HatchState,
 } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, reminderNodes } from "@squidclaw/reflexes";
 import { AgentPool, LoginStore, TenantStore, PLANS, safeEqual, type Tenant } from "@squidclaw/tenants";
@@ -265,6 +266,83 @@ export class Platform {
     writeFileSync(this.sessionsPath(tenantId), JSON.stringify(sessions), "utf8");
   }
 
+  /**
+   * The platform's own interview. When a flow refuses to run because the
+   * human still owes details, the pending questions live here — per chat,
+   * on disk — and the very next messages answer them. Asking is a guarantee
+   * of the system, not a behavior we hope the model remembers.
+   */
+  private elicitationsPath(tenantId: string): string {
+    return join(this.tenantDir(tenantId), "elicitations.json");
+  }
+
+  private elicitations(tenantId: string): Record<string, ElicitRequest> {
+    const path = this.elicitationsPath(tenantId);
+    return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, ElicitRequest>) : {};
+  }
+
+  private setElicitation(tenantId: string, chatId: string, request: ElicitRequest | null): void {
+    const pending = this.elicitations(tenantId);
+    if (request) pending[chatId] = request;
+    else delete pending[chatId];
+    mkdirSync(this.tenantDir(tenantId), { recursive: true });
+    writeFileSync(this.elicitationsPath(tenantId), JSON.stringify(pending), "utf8");
+  }
+
+  private askOf(request: ElicitRequest): string {
+    const q = request.missing[0];
+    return `📝 ${q.ask}${q.options ? ` (${q.options.join(" / ")})` : ""}`;
+  }
+
+  /** One answer in: record it, ask the next question, or run the flow. */
+  private async continueElicitation(
+    tenantId: string,
+    chatId: string,
+    request: ElicitRequest,
+    answer: string,
+    progress?: (note: string) => void,
+  ): Promise<string> {
+    const current = request.missing[0];
+    const value = answer.trim();
+
+    if (current.options && !current.options.some((o) => o.toLowerCase() === value.toLowerCase())) {
+      return `${this.askOf(request)}\nAnswer with one of: ${current.options.join(" / ")} — or /cancel.`;
+    }
+
+    request.given[current.name] = current.options
+      ? current.options.find((o) => o.toLowerCase() === value.toLowerCase())
+      : value;
+    request.missing.shift();
+
+    if (request.missing.length) {
+      this.setElicitation(tenantId, chatId, request);
+      return this.askOf(request);
+    }
+
+    // Contract satisfied — run the flow, deterministically, right now.
+    this.setElicitation(tenantId, chatId, null);
+    const organism = await this.organismFor(tenantId);
+    const habit = organism.agent.habit(request.flow);
+    if (!habit) return `The "${request.flow}" flow has vanished — /habits shows what exists now.`;
+    const denied = this.tenants.checkQuota(tenantId, "habit");
+    if (denied) return denied;
+    progress?.(`making it now — ${request.flow}…`);
+    try {
+      const out = await habit.run(request.given, [], { tenantId });
+      this.tenants.record(tenantId, "habit");
+      // If the contract STILL isn't satisfied (a placeholder answer slipped
+      // through), ask again rather than looping silently.
+      const again = (out[0]?.json as { __elicit?: ElicitRequest } | undefined)?.__elicit;
+      if (again) {
+        this.setElicitation(tenantId, chatId, again);
+        return this.askOf(again);
+      }
+      return ""; // the flow's own sends are the reply
+    } catch (err) {
+      return `⚠️ ${String(err instanceof Error ? err.message : err).slice(0, 300)}`;
+    }
+  }
+
   /** The message, dressed as the Telegram update an n8n trigger would emit. */
   private seedFor(chatId: string, text: string) {
     const numericChat = Number(chatId);
@@ -445,6 +523,19 @@ export class Platform {
       return this.runFlowSession(tenant.id, chatId, activeFlow, text);
     }
 
+    // An interview in progress: the next messages are answers, not prompts.
+    const pendingAsk = this.elicitations(tenant.id)[chatId];
+    if (pendingAsk) {
+      if (trimmed === "/cancel") {
+        this.setElicitation(tenant.id, chatId, null);
+        return "Cancelled — ask me again anytime.";
+      }
+      if (!trimmed.startsWith("/")) {
+        return this.continueElicitation(tenant.id, chatId, pendingAsk, text, progress);
+      }
+      this.setElicitation(tenant.id, chatId, null); // a command means they moved on
+    }
+
     // The window into its own mind — a one-time link, minted for this tenant only.
     if (trimmed === "/canvas") {
       return `🧠 Your agent's mind is here — this link signs you in (works once, expires in 10 minutes):\n${this.canvasLink(tenant.id)}`;
@@ -464,8 +555,21 @@ export class Platform {
     const denied = this.tenants.checkQuota(tenant.id, "thought");
     if (denied) return `⏳ ${denied}`;
 
-    const reply = await organism.agent.handleMessage(text, chatId, progress, { surface });
+    let elicit: ElicitRequest | undefined;
+    const reply = await organism.agent.handleMessage(text, chatId, progress, {
+      surface,
+      onElicit: (request) => (elicit = request),
+    });
     this.tenants.record(tenant.id, "thought");
+
+    // A flow asked for the human's own details: the platform owns the
+    // interview from here. The canonical question replaces whatever the
+    // model said — deterministic wording, deterministic follow-through.
+    if (elicit) {
+      this.setElicitation(tenant.id, chatId, elicit);
+      return `${this.askOf(elicit)}\n(/cancel if you change your mind)`;
+    }
+
     return reply;
   }
 
