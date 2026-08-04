@@ -44,6 +44,8 @@ export function startToolBridge(opts: {
   onProgress?: (note: string) => void;
   /** Fired when a flow declines to run until the human supplies details. */
   onElicit?: (request: unknown) => void;
+  /** How to actually run a tool — lets the agent route calls through its policy gate. */
+  execute?: (tool: NodeDef, args: Record<string, unknown>) => Promise<Item[]>;
 }): Promise<ToolBridge> {
   const token = randomBytes(16).toString("hex");
   const byMcpName = new Map(opts.tools.map((t) => [toMcpName(t.name), t]));
@@ -78,7 +80,9 @@ export function startToolBridge(opts: {
             opts.onProgress?.(`running ${tool.name}…`);
             const startedAt = new Date().toISOString();
             try {
-              const output = await tool.run(args ?? {}, [], { tenantId: opts.tenantId });
+              const output = await (opts.execute
+                ? opts.execute(tool, args ?? {})
+                : tool.run(args ?? {}, [], { tenantId: opts.tenantId }));
               opts.onStep({
                 node: tool.name, params: args ?? {}, output,
                 startedAt, finishedAt: new Date().toISOString(),

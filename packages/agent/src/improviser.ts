@@ -3,6 +3,7 @@ import type { Mind, ToolSpec } from "@squidclaw/brains";
 import type { ConversationStore, SemanticMemory } from "@squidclaw/memory";
 import type { VibeState } from "./vibes.js";
 import { flowNode, type ElicitRequest, type FlowStore } from "./flows.js";
+import { DEFAULT_POLICIES, executeTool, type ToolPolicy } from "./policy.js";
 import { crystallize, findRepeatedWork } from "./crystallizer.js";
 import { cleanReply, runClaudeDeep, startToolBridge, writeMcpConfig, type DeepOptions } from "./deep.js";
 
@@ -42,6 +43,11 @@ export interface AgentOptions {
    * time. Falls back to the classic loop if a deep run fails.
    */
   deep?: DeepOptions;
+  /**
+   * Tool policies — the gate every tool call passes through, whichever mind
+   * is calling. Defaults to the built-in set; supply more to tighten.
+   */
+  policies?: ToolPolicy[];
 }
 
 /** Context passed along with a run. */
@@ -104,6 +110,10 @@ export class Agent {
    * the platform queues the message as a follow-up.
    */
   private steerInboxes = new Map<string, string[]>();
+
+  private get policies(): ToolPolicy[] {
+    return this.opts.policies ?? DEFAULT_POLICIES;
+  }
 
   acceptSteer(chatId: string, text: string): boolean {
     const inbox = this.steerInboxes.get(chatId);
@@ -348,6 +358,7 @@ export class Agent {
       tenantId,
       onProgress,
       onElicit: (request) => meta?.onElicit?.(request as ElicitRequest),
+      execute: (tool, args) => executeTool(tool, args, { tenantId }, this.policies),
       onStep: (step) => {
         const nodeId = `n${++seq}`;
         graph.nodes.push({ id: nodeId, node: step.node, params: step.params });
@@ -495,7 +506,7 @@ export class Agent {
           let error: string | undefined;
           try {
             if (!def) throw new Error(`Unknown node: ${nodeName}`);
-            output = await def.run(call.input, [], { tenantId });
+            output = await executeTool(def, call.input, { tenantId }, this.policies);
           } catch (err) {
             error = String(err);
           }
