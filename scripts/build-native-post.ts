@@ -39,6 +39,12 @@ const title = String(p.title || '').trim();
 const topic = String(p.topic || '').trim();
 if (!title) throw new Error('I need a title (the headline) to make a post.');
 if (!topic) throw new Error('I need a topic — a sentence or two to write the copy from.');
+// "create tst post" is a request to USE this flow, not a headline. Refuse
+// placeholders outright — the refusal reaches the mind, which then has no
+// choice but to ask the human what the post is actually about.
+if (/^(a\s+)?(tst|test|demo|sample)(\s*-?\s*post)?$/i.test(title)) {
+  throw new Error("'" + title + "' is a placeholder, not a headline. Do not retry with another invented title — ask the human what the post should be about, wait for their answer, then call me with their real headline.");
+}
 const size = String(p.size || 'post').toLowerCase() === 'story' ? 'story' : 'post';
 const dims = size === 'post' ? { w: 1080, h: 1350 } : { w: 1080, h: 1920 };
 const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Riyadh' }));
@@ -135,7 +141,7 @@ edges.push({ from: "bem-19", to: "send-err-20" });
 const flow = {
   name: FLOW,
   description:
-    "Create and deliver a finished Saudi Times formal post card to the chat. Use whenever the human asks for a formal post, news card, or Saudi Times post. IMPORTANT: title and topic must come from the human's own words. If they did not say what the post is about, DO NOT call this tool yet — ask them for the headline (and optionally whether they want post or story size), wait for the answer, then call it. Never invent placeholder titles or topics. Params: title (the human's headline), topic (a sentence or two the copy is written from — if the human only gave a headline, use it as the topic too), size ('post' or 'story'; default 'post'). It drafts the copy, generates an editorial image, renders the branded card and sends it with its caption. After it runs, confirm briefly — the card itself arrives in the chat.",
+    "Create and deliver a finished Saudi Times formal post card to the chat. Use whenever the human asks for a formal post, news card, or Saudi Times post. IMPORTANT: title and topic must be the actual SUBJECT of the post, in the human's own words. Phrases like 'test post', 'tst post', 'a post', 'try the flow' are requests to use this tool, NOT subjects — in those cases DO NOT call yet: ask the human what the post should be about (and optionally post or story size), wait for the answer, then call with their real headline. Never invent placeholder titles or topics. Params: title (the human's headline), topic (a sentence or two the copy is written from — if the human only gave a headline, use it as the topic too), size ('post' or 'story'; default 'post'). It drafts the copy, generates an editorial image, renders the branded card and sends it with its caption. After it runs, confirm briefly — the card itself arrives in the chat.",
   signature: "native:post",
   triggers: [],
   params: ["title", "topic", "size"],
