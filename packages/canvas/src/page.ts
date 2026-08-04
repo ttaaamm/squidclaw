@@ -187,10 +187,47 @@ function starField(count, color, size, spread) {
 ambient.add(starField(500, 0x4fc3ff, 1.1, 620));
 ambient.add(starField(180, 0xffb35c, 1.3, 620));
 
+/* ————— dendritic arborization: branches that split and end in terminals ————— */
+function seededRand(seed) {
+  let s = seed >>> 0;
+  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+/**
+ * A real dendrite forks and forks again, ending in many bright terminals —
+ * this grows one: "count" primary branches from origin, each splitting into
+ * twigs, each twig tipped with a tiny glowing end (some amber, like sparks).
+ */
+function dendriteTree(count, length, seed, tipSize) {
+  const rand = seededRand(seed);
+  const tree = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+  const dir0 = new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).normalize();
+  for (let b = 0; b < count; b++) {
+    const dir = new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).normalize().lerp(dir0, -0.15).normalize();
+    const bend = new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).multiplyScalar(length * .5);
+    const end = dir.clone().multiplyScalar(length * (0.75 + rand() * 0.5));
+    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(), dir.clone().multiplyScalar(length * .45).add(bend.multiplyScalar(.4)), end);
+    tree.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(14)), mat));
+    const twigs = 2 + Math.floor(rand() * 2);
+    for (let t = 0; t < twigs; t++) {
+      const tdir = dir.clone().add(new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).multiplyScalar(.9)).normalize();
+      const tend = end.clone().add(tdir.multiplyScalar(length * (0.3 + rand() * 0.35)));
+      const tcurve = new THREE.QuadraticBezierCurve3(end, end.clone().lerp(tend, .5).add(new THREE.Vector3(rand() - .5, rand() - .5, rand() - .5).multiplyScalar(length * .12)), tend);
+      tree.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(tcurve.getPoints(8)), mat));
+      const tip = sprite(rand() < 0.3 ? TEX.amber : TEX.cyan, tipSize * (0.7 + rand() * 0.6), .9);
+      tip.position.copy(tend);
+      tree.add(tip);
+    }
+  }
+  return tree;
+}
+
 /* ————— the brain ————— */
 const brain = new THREE.Group(); scene.add(brain);
 const core = new THREE.Group();
 core.add(sprite(TEX.cyan, 30), sprite(TEX.halo, 95, .9), sprite(TEX.halo, 55, .9));
+// The cell body wears a crown of dendrites, like the reference image's core.
+core.add(dendriteTree(11, 34, 7, 1.6));
 brain.add(core);
 
 let state = null, runs = [];
@@ -238,12 +275,16 @@ function buildBrain() {
     const coreSprite = sprite(f.draft ? TEX.dim : TEX.cyan, 10);
     const halo = sprite(TEX.halo, 30, .8);
     coreSprite.userData = { kind: 'neuron', name: f.name };
-    group.add(coreSprite, halo);
+    // Each job branches onward — the arbor's size comes from the flow itself:
+    // more steps, more dendrites. Real anatomy from real data.
+    const arborBranches = Math.max(3, Math.min(8, Math.round(((f.params && f.params.length) || 0) + 3 + (f.runs > 5 ? 2 : 0))));
+    const arbor = dendriteTree(arborBranches, 11, hashOf(f.name), 0.9);
+    group.add(coreSprite, halo, arbor);
     brain.add(group);
     const d = dendrite(new THREE.Vector3(0, 0, 0), pos, f.name);
     brain.add(d.line);
     const signal = sprite(TEX.amber, 3.2, 0); brain.add(signal);
-    neurons.set(f.name, { flow: f, group, coreSprite, halo, pos, dendrite: d, signal, cluster: null });
+    neurons.set(f.name, { flow: f, group, coreSprite, halo, arbor, pos, dendrite: d, signal, cluster: null });
     label(f.name, f.draft ? 'forming' : f.runs + ' runs', group, '', 0, 1e9);
   });
 }
@@ -276,7 +317,10 @@ async function loadCluster(name) {
     s.position.copy(p);
     s.userData = { kind: 'step', flow: name, id: node.id };
     const hl = sprite(TEX.halo, 7, .7); hl.position.copy(p);
-    cluster.add(s, hl);
+    // Every job ends in more ends: a small terminal arbor per step.
+    const twig = dendriteTree(3, 2.4, hashOf(node.id), 0.5);
+    twig.position.copy(p);
+    cluster.add(s, hl, twig);
     const stepName = (info.params && info.params.n8nName) ? info.params.n8nName : node.node;
     const lbl = label(stepName, '', { getWorldPosition: (v) => v.copy(p).add(n.pos), isStep: true }, '', 0, 46);
     lbl.el.style.fontSize = '9.5px';
@@ -482,6 +526,7 @@ function animate() {
       const shrink = 1 - near * 0.75;
       n.coreSprite.scale.setScalar(10 * pulse * shrink);
       n.halo.scale.setScalar(30 * shrink);
+      n.arbor.scale.setScalar(shrink); // the outer arbor folds away as you enter
       for (const [, obj] of n.cluster.steps) {
         if (obj.pulsing) { obj.sprite.scale.setScalar(2.6 * (1 + Math.sin(t * 6) * 0.3)); obj.halo.scale.setScalar(7 * (1 + Math.sin(t * 6) * 0.2)); }
       }
