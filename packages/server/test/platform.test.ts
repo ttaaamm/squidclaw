@@ -209,3 +209,53 @@ describe("the platform", () => {
     platform.stop();
   });
 });
+
+describe("the local Anthropic socket — API shape, subscription brain", () => {
+  it("answers /v1/messages through the platform's mind, no API key involved", async () => {
+    const { platform, seen } = makePlatform([says("ANNOUNCEMENT: the dialect lives")]);
+    const server = platform.hooksServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+
+    const res = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": "ignored-entirely" },
+      body: JSON.stringify({
+        model: "claude-whatever",
+        max_tokens: 900,
+        system: "You write newspaper copy.",
+        messages: [{ role: "user", content: "Write the formal post." }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { content: Array<{ type: string; text: string }> };
+    // The exact shape Parse Text reads: res.content[0].text
+    expect(body.content[0].text).toBe("ANNOUNCEMENT: the dialect lives");
+    expect(seen[0].system).toBe("You write newspaper copy.");
+
+    await new Promise<void>((r) => server.close(() => r()));
+    platform.stop();
+  });
+
+  it("returns Anthropic's error shape when the mind fails — imported error handling reads it natively", async () => {
+    const root = mkdtempSync(join(tmpdir(), "platform-"));
+    writeFileSync(join(root, "INNERME.md"), "# INNER ME\n");
+    const mind = new Brains({ tiers: { cheap: ["m"], strong: ["m"] } }, async () => {
+      throw new Error("the brain is asleep");
+    });
+    const platform = new Platform({ root, mind, via: "cli", adminChats: ["telegram:999"] });
+    const server = platform.hooksServer();
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    const port = (server.address() as { port: number }).port;
+
+    const res = await fetch(`http://127.0.0.1:${port}/v1/messages`, {
+      method: "POST", body: JSON.stringify({ messages: [] }),
+    });
+    const body = (await res.json()) as { error: { type: string; message: string } };
+    expect(body.error.type).toBe("api_error");
+    expect(body.error.message).toContain("the brain is asleep");
+
+    await new Promise<void>((r) => server.close(() => r()));
+    platform.stop();
+  });
+});

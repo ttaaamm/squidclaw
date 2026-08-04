@@ -480,6 +480,40 @@ export class Platform {
         res.end(JSON.stringify(body));
       };
 
+      // A local Anthropic-shaped socket, backed by whatever mind this
+      // platform thinks with — on a subscription CLI, that means imported
+      // flows write text with NO API credits. Point an n8n httpRequest at
+      // http://127.0.0.1:<hooksPort>/v1/messages and it just works: same
+      // request shape in, same {content:[{type:"text",text}]} out.
+      // Localhost only — this is a wall socket, not a public utility.
+      if (req.url === "/v1/messages" && req.method === "POST") {
+        const remote = req.socket.remoteAddress ?? "";
+        if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(remote)) return send(403, { error: "local callers only" });
+        let raw = "";
+        req.on("data", (c: Buffer) => (raw += c));
+        req.on("end", () => {
+          void (async () => {
+            try {
+              const body = JSON.parse(raw || "{}") as {
+                system?: string; messages?: unknown[]; max_tokens?: number;
+              };
+              const result = await this.opts.mind.complete({
+                tier: "strong",
+                system: body.system,
+                messages: body.messages ?? [],
+                maxTokens: body.max_tokens ?? 1024,
+              });
+              send(200, { content: [{ type: "text", text: result.text }] });
+            } catch (err) {
+              // Anthropic's error shape, so imported flows' own error
+              // handling (Parse Text & friends) reads it natively.
+              send(200, { error: { type: "api_error", message: String(err instanceof Error ? err.message : err) } });
+            }
+          })();
+        });
+        return;
+      }
+
       if ((req.url ?? "").startsWith("/partner/") && req.method === "POST") {
         const bearer = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "");
         if (!partnerKey || !bearer || !safeEqual(bearer, partnerKey)) return send(401, { error: "bad partner key" });
