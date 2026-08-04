@@ -7,7 +7,7 @@
  */
 import { createServer } from "node:http";
 import { PAGE } from "../packages/canvas/src/page.js";
-import { layoutGraph } from "../packages/canvas/src/layout.js";
+import { layoutRadial } from "../packages/canvas/src/layout.js";
 import type { Graph } from "@squidclaw/kernel";
 
 const step = (id: string, n8nName: string) => ({ id, node: "n8n.step", params: { n8nName, __flow: "post" } });
@@ -64,7 +64,7 @@ const runsList = () => [
 
 const detail = () => ({
   ...mkRun("run-1", "post", "error", 12),
-  layout: layoutGraph(GRAPH),
+  layout: layoutRadial(GRAPH),
   nodes: GRAPH.nodes.map((n) => ({
     id: n.id, node: n.node, params: n.params,
     ...(statuses[n.id] ?? {}), input: [{ demo: true }], output: [{ made: true }],
@@ -103,7 +103,7 @@ const server = createServer((req, res) => {
   if (url.startsWith("/api/habits/")) {
     const name = decodeURIComponent(url.split("/").pop()!);
     const f = [...flows, ...drafts].find((x) => x.name === name) ?? flows[0];
-    return json({ ...f, triggers: ["make a formal post about X"], layout: layoutGraph(GRAPH), nodes: GRAPH.nodes.map((n) => ({ id: n.id, node: n.node, params: n.params })) });
+    return json({ ...f, triggers: ["make a formal post about X"], layout: layoutRadial(GRAPH), nodes: GRAPH.nodes.map((n) => ({ id: n.id, node: n.node, params: n.params })) });
   }
   if (url === "/api/events") {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });

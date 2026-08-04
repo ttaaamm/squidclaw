@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { layoutGraph } from "./layout.js";
+import { layoutRadial } from "./layout.js";
 import { dashboardState, executionDetail, executionList, type Sources } from "./api.js";
 import { PAGE } from "./page.js";
 import { safeEqual } from "@squidclaw/tenants";
@@ -131,7 +131,7 @@ export class DashboardServer {
       if (!flow) return this.send(res, 404, { error: "no such habit" });
       return this.send(res, 200, {
         ...flow,
-        layout: layoutGraph(flow.graph),
+        layout: layoutRadial(flow.graph),
         nodes: flow.graph.nodes.map((n) => ({ id: n.id, node: n.node, params: n.params })),
       });
     }

@@ -83,6 +83,96 @@ function edgePath(from: LaidOutNode, to: LaidOutNode): string {
   return `M ${x1} ${y1} C ${x1 + dx} ${y1 + w}, ${x2 - dx} ${y2 - w}, ${x2} ${y2}`;
 }
 
+/**
+ * Zooming into a neuron: the roots are the nucleus at the center, and each
+ * rank of execution spirals outward on widening shells — dendrites branching
+ * from the cell body, not a left-to-right org chart. Outer shells compress
+ * (sqrt-ish growth) so a 29-step flow still fits on a screen, and a steady
+ * angular curl keeps long chains winding around the nucleus organically.
+ */
+export function layoutRadial(graph: Graph): Layout {
+  const rank = rankNodes(graph);
+  const rings = new Map<number, string[]>();
+  for (const n of graph.nodes) {
+    const r = rank.get(n.id) ?? 0;
+    rings.set(r, [...(rings.get(r) ?? []), n.id]);
+  }
+  const maxRank = Math.max(0, ...rank.values());
+  const radiusOf = (r: number) => (r === 0 ? 0 : 120 * Math.pow(r, 0.72));
+  const size = Math.max(560, 2 * radiusOf(maxRank) + 340);
+  const c = size / 2;
+  const CURL = 0.85; // radians of drift per rank — the spiral
+
+  const parents = new Map<string, string[]>();
+  for (const n of graph.nodes) parents.set(n.id, []);
+  for (const e of graph.edges) parents.get(e.to)?.push(e.from);
+
+  const angles = new Map<string, number>();
+  const placed = new Map<string, LaidOutNode>();
+
+  for (let r = 0; r <= maxRank; r++) {
+    const ids = rings.get(r) ?? [];
+    if (!ids.length) continue;
+    const desired = ids.map((id) => {
+      const ps = (parents.get(id) ?? []).filter((p) => angles.has(p));
+      const base = ps.length
+        ? ps.reduce((s, p) => s + angles.get(p)!, 0) / ps.length
+        : -Math.PI / 2;
+      return { id, angle: base + (r === 0 ? 0 : CURL) + (wobble(id, "a") / 200) };
+    }).sort((a, b) => a.angle - b.angle);
+
+    // Same-shell neighbors must not overlap: nudge apart to a minimum gap.
+    const minGap = r === 0 ? (2 * Math.PI) / Math.max(1, ids.length) : 170 / Math.max(radiusOf(r), 170);
+    for (let i = 1; i < desired.length; i++) {
+      if (desired[i].angle - desired[i - 1].angle < minGap) {
+        desired[i].angle = desired[i - 1].angle + minGap;
+      }
+    }
+
+    desired.forEach((d, i) => {
+      const angle = r === 0 && ids.length > 1 ? -Math.PI / 2 + (i * 2 * Math.PI) / ids.length : d.angle;
+      angles.set(d.id, angle);
+      const radius = radiusOf(r);
+      const node = graph.nodes.find((n) => n.id === d.id)!;
+      placed.set(d.id, {
+        id: d.id, node: node.node, rank: r,
+        x: c + radius * Math.cos(angle) - NODE_W / 2,
+        y: c + radius * Math.sin(angle) - ORB_CY,
+        width: NODE_W, height: NODE_H,
+      });
+    });
+  }
+
+  // The spiral wanders — crop the canvas to where it actually went, so the
+  // cell fills the frame instead of floating in empty space.
+  const all = [...placed.values()];
+  const PAD2 = 46;
+  const minX = Math.min(...all.map((n) => n.x));
+  const minY = Math.min(...all.map((n) => n.y));
+  const maxX = Math.max(...all.map((n) => n.x + n.width));
+  const maxY = Math.max(...all.map((n) => n.y + n.height));
+  for (const n of all) { n.x += PAD2 - minX; n.y += PAD2 - minY; }
+
+  const center = (n: LaidOutNode) => ({ x: n.x + n.width / 2, y: n.y + ORB_CY });
+  const edges: LaidOutEdge[] = graph.edges
+    .filter((e) => placed.has(e.from) && placed.has(e.to))
+    .map((e) => {
+      const a = center(placed.get(e.from)!);
+      const b = center(placed.get(e.to)!);
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      const ux = dx / len, uy = dy / len;
+      const sx = a.x + ux * ORB_R, sy = a.y + uy * ORB_R;
+      const ex = b.x - ux * ORB_R, ey = b.y - uy * ORB_R;
+      const w = wobble(e.from, e.to) * Math.min(2.2, len / 90);
+      const mx = (sx + ex) / 2 - uy * w;
+      const my = (sy + ey) / 2 + ux * w;
+      return { from: e.from, to: e.to, path: `M ${sx.toFixed(1)} ${sy.toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)}, ${ex.toFixed(1)} ${ey.toFixed(1)}` };
+    });
+
+  return { nodes: all, edges, width: maxX - minX + PAD2 * 2, height: maxY - minY + PAD2 * 2 };
+}
+
 export function layoutGraph(graph: Graph): Layout {
   const rank = rankNodes(graph);
 

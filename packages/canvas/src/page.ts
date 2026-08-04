@@ -73,7 +73,10 @@ export const PAGE = String.raw`<!doctype html>
   .card h3 { margin:0 0 4px; font-size:13px; }
   .card p { margin:0; color:var(--dim); font-size:12.5px; }
   .canvas-wrap { border:1px solid var(--line); border-radius:12px; background:rgba(5,10,22,.5);
-    overflow:auto; margin-bottom:16px; }
+    overflow:hidden; margin-bottom:16px; display:flex; justify-content:center; max-height:74vh; }
+  .canvas-wrap svg { width:100%; height:auto; max-height:74vh; margin:auto;
+    animation:dive .55s cubic-bezier(.2,.8,.3,1); }
+  @keyframes dive { from { transform:scale(.45); opacity:0; } }
   svg { display:block; }
   .back { display:inline-block; margin-bottom:12px; color:var(--accent); cursor:pointer;
     font:12px var(--mono); background:none; border:0; padding:0; }
@@ -324,7 +327,7 @@ async function openRun(id) {
     '<div class="card"><h3>' + (e.kind === 'flow' ? (e.flow ? esc(e.flow) + ' run' : 'SquidFlow run') : 'Improvised thought') + ' · ' +
       '<span class="' + (e.status === 'error' ? 'err' : '') + '">' + e.status + '</span></h3>' +
       '<p>' + esc(e.shape) + '</p></div>' +
-    '<div class="canvas-wrap">' + svg(e.layout, e.nodes) + '</div>' +
+    '<div class="canvas-wrap">' + svg(e.layout, e.nodes, e.status) + '</div>' +
     '<div class="card"><div class="kv">' +
       '<span>started</span><b>' + new Date(e.startedAt).toLocaleString() + '</b>' +
       '<span>took</span><b>' + (dur(e.durationMs) || '—') + '</b>' +
@@ -336,8 +339,21 @@ async function openRun(id) {
 }
 
 /* ——— a run's inner network: each step a neuron, fired synapses animated ——— */
-function svg(L, nodes) {
+function svg(L, nodes, runStatus) {
   const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+  // A live run: the frontier — steps whose parents finished but that have no
+  // record yet — is what's firing RIGHT NOW. Show it pulsing.
+  if (runStatus === 'running') {
+    for (const n of L.nodes) {
+      const info = byId[n.id];
+      if (!info || info.status) continue;
+      const parents = L.edges.filter(e => e.to === n.id).map(e => byId[e.from]);
+      const ready = parents.length
+        ? parents.some(p => p && (p.status === 'ok' || p.status === 'running'))
+        : true;
+      if (ready) info.status = 'running';
+    }
+  }
   const fired = (id) => { const s = (byId[id] || {}).status; return s === 'ok' || s === 'error' || s === 'running'; };
   const edges = L.edges.map(e => {
     const cls = 'edge' +

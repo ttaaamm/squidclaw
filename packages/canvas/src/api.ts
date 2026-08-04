@@ -1,7 +1,7 @@
 import type { ExecutionRecord, Journal } from "@squidclaw/kernel";
 import type { Flow, FlowStore } from "@squidclaw/agent";
 import type { Reflex, ReflexStore } from "@squidclaw/reflexes";
-import { layoutGraph, type Layout } from "./layout.js";
+import { layoutRadial, type Layout } from "./layout.js";
 
 export interface MindSummary {
   via: string;
@@ -76,7 +76,7 @@ export function detail(execution: ExecutionRecord): ExecutionDetail {
   const byNodeId = new Map(execution.steps.map((s) => [s.nodeId, s]));
   return {
     ...summarize(execution),
-    layout: layoutGraph(execution.graph),
+    layout: layoutRadial(execution.graph),
     nodes: execution.graph.nodes.map((n) => {
       const step = byNodeId.get(n.id);
       return {
