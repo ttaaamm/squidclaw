@@ -108,10 +108,17 @@ describe("flow sessions — the n8n trigger, reborn", () => {
     expect(sent[1].text).toContain('you said "hello flow"');
     expect(sent[1].text).toContain("turn 2"); // staticData counted across runs
 
+    // The flow owns its own slash commands — /post, /setkey, /cancel are the
+    // n8n bot's vocabulary, not the platform's. Only /flow stays reserved.
+    const cmd = await platform.handle("telegram", "111", "/post");
+    expect(cmd).toBe("");
+    expect(sent).toHaveLength(3);
+    expect(sent[2].text).toContain('you said "/post"');
+
     // Leaving restores the mind.
     expect(await platform.handle("telegram", "111", "/flow off")).toContain("talking to me again");
     expect(await platform.handle("telegram", "111", "hello mind")).toBe("mind answered");
-    expect(sent).toHaveLength(2); // the flow stayed quiet
+    expect(sent).toHaveLength(3); // the flow stayed quiet
     platform.stop();
   });
 

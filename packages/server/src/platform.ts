@@ -436,8 +436,12 @@ export class Platform {
       return first || `▶️ This chat now runs the "${arg}" flow — every message goes straight to it. /flow off to leave.`;
     }
 
+    // Inside a session the flow owns the WHOLE conversation — including its
+    // slash commands. n8n bots live on them (/post, /setkey, /cancel, /regen),
+    // so nothing may be intercepted except the one escape door this platform
+    // promised in every message: /flow off.
     const activeFlow = this.flowSessions(tenant.id)[chatId];
-    if (activeFlow && !trimmed.startsWith("/")) {
+    if (activeFlow && !trimmed.startsWith("/flow")) {
       return this.runFlowSession(tenant.id, chatId, activeFlow, text);
     }
 
