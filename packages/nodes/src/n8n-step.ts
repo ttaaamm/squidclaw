@@ -234,7 +234,7 @@ async function telegramStep(
     const fileName = basename(file.file_path);
     return {
       json: { ...item.json, ...file },
-      binary: { data: { data: buf, fileName, mimeType: res.headers.get("content-type") ?? undefined } },
+      binary: { data: { data: buf, fileName, fileSize: buf.length, mimeType: res.headers.get("content-type") ?? undefined } },
     };
   }
 
@@ -418,7 +418,7 @@ async function executeStep(
           if (wantsFile || (!contentType.includes("json") && !contentType.startsWith("text/"))) {
             const buf = Buffer.from(await res.arrayBuffer());
             const prop = String(respOpts.outputPropertyName ?? "data");
-            out.push({ json: { ...item.json }, binary: { [prop]: { data: buf, mimeType: contentType || undefined } } });
+            out.push({ json: { ...item.json }, binary: { [prop]: { data: buf, fileSize: buf.length, mimeType: contentType || undefined } } });
           } else {
             // n8n hands the response body straight through as $json —
             // downstream code does res.content[0].text, not res.body.content.
@@ -460,7 +460,7 @@ async function executeStep(
           } else {
             const fileName = resolve(String(p.fileSelector ?? p.fileName ?? ""));
             const data = readFileSync(fileName);
-            out.push({ json: { fileName }, binary: { data: { data, fileName: basename(fileName) } } });
+            out.push({ json: { fileName }, binary: { data: { data, fileName: basename(fileName), fileSize: data.length } } });
           }
         }
         return out;

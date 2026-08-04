@@ -202,8 +202,10 @@ describe("httpRequest speaks n8n", () => {
     expect(raw).toContain('filename="index.html"'); // the name Gotenberg insists on
     expect(raw).toContain("<html>x</html>");        // base64 envelope decoded to real bytes
     expect(raw).toContain('name="format"');
-    const bin = out[0].binary!.data as { data: Buffer };
+    const bin = out[0].binary!.data as { data: Buffer; fileSize?: number; mimeType?: string };
     expect(bin.data.toString()).toBe("PNG-BYTES");  // file response landed as binary
+    expect(bin.fileSize).toBe(9);                   // n8n stamps size; imported sanity checks read it
+    expect(bin.mimeType).toBe("image/png");
   });
 });
 

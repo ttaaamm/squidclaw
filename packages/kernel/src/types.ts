@@ -7,7 +7,14 @@
  */
 export type BinaryValue =
   | Buffer
-  | { data: Buffer | string; fileName?: string; mimeType?: string; fileExtension?: string };
+  | {
+      data: Buffer | string;
+      fileName?: string;
+      mimeType?: string;
+      fileExtension?: string;
+      /** n8n stamps this on every binary; imported sanity checks read it (number or "95 kB" style). */
+      fileSize?: number | string;
+    };
 
 /** The bytes, whichever shape they travel in. String content is base64 (n8n's wire format). */
 export function binaryBuffer(value: BinaryValue): Buffer {
