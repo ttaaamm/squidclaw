@@ -287,7 +287,7 @@ export class Agent {
   }
 
   /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
-  private systemPrompt(chatId: string, surface?: string): string {
+  private systemPrompt(chatId: string, surface?: string, messageText?: string): string {
     const parts = [this.opts.innerMe, BEHAVIOR];
 
     // Situational awareness: an agent that doesn't know the date feels broken.
@@ -312,6 +312,23 @@ export class Agent {
       const more =
         known.length > MEMORY_DIGEST_LIMIT ? `\n(+${known.length - MEMORY_DIGEST_LIMIT} more — use memory.recall)` : "";
       parts.push(`## What I remember\n${digest}${more}`);
+    }
+
+    // Instruction sheets: a flow can carry its own deep usage notes (its
+    // SKILL.md), loaded only when the message touches its territory — real
+    // guidance for complex tools, without paying its token cost every turn.
+    if (messageText && this.opts.flows) {
+      const lower = messageText.toLowerCase();
+      let loaded = 0;
+      for (const flow of this.opts.flows.promoted()) {
+        if (loaded >= 2) break;
+        const sheet = this.opts.flows.sheetFor(flow.name);
+        if (!sheet) continue;
+        const cues = [flow.name.toLowerCase(), ...flow.name.toLowerCase().split("-"), ...sheet.when];
+        if (!cues.some((c) => c.length > 2 && lower.includes(c))) continue;
+        parts.push(`## How to use flow.${flow.name}\n${sheet.body.slice(0, 2000)}`);
+        loaded++;
+      }
     }
 
     return parts.join("\n\n");
@@ -388,7 +405,7 @@ export class Agent {
       const reply = await runClaudeDeep({
         deep,
         prompt,
-        system: this.systemPrompt(chatId, meta?.surface),
+        system: this.systemPrompt(chatId, meta?.surface, text),
         mcpConfigPath: writeMcpConfig(deep.shimPath, bridge),
       });
 
@@ -480,7 +497,7 @@ export class Agent {
         onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface),
+          system: this.systemPrompt(chatId, meta?.surface, text),
           messages,
           tools,
         });
@@ -552,7 +569,7 @@ export class Agent {
         onProgress?.("wrapping up…");
         const final = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface),
+          system: this.systemPrompt(chatId, meta?.surface, text),
           messages: [
             ...messages,
             {
@@ -578,7 +595,7 @@ export class Agent {
         onProgress?.("answering your follow-up too…");
         const more = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface),
+          system: this.systemPrompt(chatId, meta?.surface, text),
           messages,
         });
         reply = [reply, cleanReply(more.text)].filter(Boolean).join("\n\n");

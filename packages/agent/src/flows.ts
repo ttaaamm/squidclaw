@@ -158,6 +158,25 @@ export class FlowStore {
     return flows;
   }
 
+  /**
+   * A flow's instruction sheet — its own SKILL.md, living beside the flow
+   * file as <name>.md. First line may declare relevance keywords
+   * ("when: poster, artwork"); the rest is guidance the mind loads only
+   * when a message touches that territory. Depth without paying its token
+   * cost on every turn.
+   */
+  sheetFor(name: string): { when: string[]; body: string } | undefined {
+    const path = join(this.dir, `${name}.md`);
+    if (!existsSync(path)) return undefined;
+    const raw = readFileSync(path, "utf8");
+    const front = raw.match(/^when:\s*(.+)\r?\n/);
+    const when = front
+      ? front[1].split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : [];
+    const body = (front ? raw.slice(front[0].length) : raw).trim();
+    return body ? { when, body } : undefined;
+  }
+
   drafts(): Flow[] {
     return this.read(this.draftsDir, "draft");
   }
