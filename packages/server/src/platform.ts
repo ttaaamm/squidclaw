@@ -720,7 +720,7 @@ if (sub === "scopes") {
     const gotenberg = process.env.GOTENBERG_URL;
     if (gotenberg) {
       try {
-        const res = await fetch(`${gotenberg}/health`, { signal: AbortSignal.timeout(4000) });
+        const res = await fetch(`${gotenberg}/health`, { signal: AbortSignal.timeout(8000) });
         if (res.ok) ok("gotenberg tunnel healthy");
         else warn(`gotenberg tunnel answered HTTP ${res.status}`);
       } catch { warn("gotenberg tunnel unreachable — check the squidclaw-gotenberg service"); }
