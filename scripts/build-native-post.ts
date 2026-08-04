@@ -135,7 +135,7 @@ edges.push({ from: "bem-19", to: "send-err-20" });
 const flow = {
   name: FLOW,
   description:
-    "Create and deliver a finished Saudi Times formal post card to the chat. Use whenever the human asks for a formal post, news card, or Saudi Times post. Params: title (the headline), topic (a sentence or two the copy is written from — if the human only gave a headline, use it as the topic too), size ('post' or 'story'; default 'post'). It drafts the copy, generates an editorial image, renders the branded card and sends it with its caption. After it runs, confirm briefly — the card itself arrives in the chat.",
+    "Create and deliver a finished Saudi Times formal post card to the chat. Use whenever the human asks for a formal post, news card, or Saudi Times post. IMPORTANT: title and topic must come from the human's own words. If they did not say what the post is about, DO NOT call this tool yet — ask them for the headline (and optionally whether they want post or story size), wait for the answer, then call it. Never invent placeholder titles or topics. Params: title (the human's headline), topic (a sentence or two the copy is written from — if the human only gave a headline, use it as the topic too), size ('post' or 'story'; default 'post'). It drafts the copy, generates an editorial image, renders the branded card and sends it with its caption. After it runs, confirm briefly — the card itself arrives in the chat.",
   signature: "native:post",
   triggers: [],
   params: ["title", "topic", "size"],
