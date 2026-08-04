@@ -259,3 +259,34 @@ describe("the local Anthropic socket — API shape, subscription brain", () => {
     platform.stop();
   });
 });
+
+describe("/plugins — the marketplace door", () => {
+  it("lists installed, failed, and available plugins for the admin", async () => {
+    const root = mkdtempSync(join(tmpdir(), "platform-"));
+    writeFileSync(join(root, "INNERME.md"), "# INNER ME\n");
+    const { mind } = scriptedMind();
+    const platform = new Platform({
+      root, mind, via: "cli", adminChats: ["telegram:999"],
+      plugins: {
+        plugins: [{ name: "weather", version: "2.0", nodes: 3, surfaces: 0 }],
+        failed: { "broken-one": "exploded on import" },
+      },
+    });
+
+    const out = await platform.handle("telegram", "999", "/plugins");
+    expect(out).toContain("weather v2.0 — 3 node(s)");
+    expect(out).toContain("broken-one: exploded on import");
+    expect(out).toContain("dice"); // the marketplace still has it on offer
+    platform.stop();
+  });
+
+  it("stays admin-only", async () => {
+    const root = mkdtempSync(join(tmpdir(), "platform-"));
+    writeFileSync(join(root, "INNERME.md"), "# INNER ME\n");
+    const { mind } = scriptedMind();
+    const platform = new Platform({ root, mind, via: "cli", adminChats: ["telegram:999"] });
+    const out = await platform.handle("telegram", "111", "/plugins");
+    expect(out).not.toContain("Installed plugins");
+    platform.stop();
+  });
+});

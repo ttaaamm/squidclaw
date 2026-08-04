@@ -9,13 +9,14 @@ import {
 } from "@squidclaw/memory";
 import { extractTextFromFile } from "@squidclaw/nodes";
 import {
-  Agent, DEFAULT_POLICIES, FlowStore, VibeState, loadVibes,
+  Agent, DEFAULT_POLICIES, FlowStore, VibeState, delegateNode, loadVibes,
   answerHatching, beginHatching, birthAnnouncement, dream, scopePolicy,
   type ElicitRequest, type HatchState,
 } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, parseWhen, reminderNodes } from "@squidclaw/reflexes";
 import { AgentPool, LoginStore, TenantStore, PLANS, safeEqual, type Tenant } from "@squidclaw/tenants";
 import type { Sources } from "@squidclaw/canvas";
+import { MARKETPLACE } from "@squidclaw/sdk";
 import { habitRunner, handleCommand, type Booted } from "./boot.js";
 
 export interface PlatformOptions {
@@ -31,6 +32,11 @@ export interface PlatformOptions {
   deep?: import("@squidclaw/agent").DeepOptions;
   /** Where the canvas lives, for sign-in links: e.g. https://flow.preplix.ai */
   publicUrl?: string;
+  /** What the plugin loader found at boot — for /plugins visibility. */
+  plugins?: {
+    plugins: Array<{ name: string; version?: string; description?: string; nodes: number; surfaces: number }>;
+    failed: Record<string, string>;
+  };
 }
 
 /**
@@ -126,6 +132,8 @@ export class Platform {
       // Tools holding this tenant's data are private to this agent, never global:
       // memories, todo list, reminders, knowledge base, who's-who profiles.
       extraNodes: [
+        // The 8-brains door: specialists on demand, parallel, journaled.
+        delegateNode({ brains: this.opts.mind, journal, tenantId: tenant.id, memory, policies: [...DEFAULT_POLICIES, scopePolicy(tenant.scopes)] }),
         ...memoryNodes(memory),
         ...taskNodes(taskList(dir)),
         ...reminderNodes(reflexes),
@@ -527,6 +535,27 @@ if (sub === "scopes") {
 
     if (admin && (trimmed === "/tenants" || trimmed.startsWith("/tenant"))) {
       return this.adminCommand(trimmed);
+    }
+
+    if (admin && trimmed === "/plugins") {
+      const info = this.opts.plugins;
+      const installed = info?.plugins.length
+        ? info.plugins
+            .map((p) => `  🔌 ${p.name}${p.version ? ` v${p.version}` : ""} — ${p.nodes} node(s), ${p.surfaces} surface(s)`)
+            .join("\n")
+        : "  (none installed)";
+      const failed = Object.entries(info?.failed ?? {})
+        .map(([n, why]) => `  ⚠️ ${n}: ${why}`)
+        .join("\n");
+      const market = MARKETPLACE
+        .filter((m) => !info?.plugins.some((p) => p.name === m.name))
+        .map((m) => `  ◦ ${m.name} — ${m.description} (${m.source})`)
+        .join("\n");
+      return [
+        `Installed plugins:\n${installed}`,
+        failed ? `Failed to load:\n${failed}` : "",
+        market ? `Available (copy into workspace/plugins and restart):\n${market}` : "",
+      ].filter(Boolean).join("\n\n");
     }
 
     if (trimmed.startsWith("/join")) {

@@ -2,7 +2,8 @@ import "dotenv/config";
 import { join } from "node:path";
 import { listNodes } from "@squidclaw/kernel";
 import { registerBuiltinNodes } from "@squidclaw/nodes";
-import { Journal } from "@squidclaw/kernel";
+import { loadPlugins } from "@squidclaw/sdk";
+import { Journal, registerNode } from "@squidclaw/kernel";
 import { FlowStore } from "@squidclaw/agent";
 import { ReflexStore } from "@squidclaw/reflexes";
 import { SemanticMemory } from "@squidclaw/memory";
@@ -23,6 +24,18 @@ requireEnv("TELEGRAM_BOT_TOKEN");
 
 const root = process.env.SQUIDCLAW_WORKSPACE ?? join(process.cwd(), "workspace");
 registerBuiltinNodes();
+
+// Plugins: anything under <workspace>/plugins joins the arsenal — its tools
+// become nodes/mind-tools/flow-steps, its surfaces become new doors. One
+// broken plugin is reported by name, never fatal.
+const loadedPlugins = await loadPlugins(
+  join(root, "plugins"),
+  { workspace: root, env: process.env, log: (m) => console.log(`🔌 ${m}`) },
+  (pluginName) => (chatId, text, progress) => platform.handle(`plugin:${pluginName}`, chatId, text, progress),
+);
+for (const node of loadedPlugins.nodes) registerNode(node);
+for (const [name, why] of Object.entries(loadedPlugins.failed)) console.error(`🔌 plugin ${name} failed: ${why}`);
+
 const { mind, via } = chooseMind(root);
 
 const admins = (process.env.SQUIDCLAW_ADMIN_CHAT ?? "")
@@ -38,6 +51,7 @@ const platform = new Platform({
   mind,
   via,
   adminChats: admins,
+  plugins: { plugins: loadedPlugins.plugins, failed: loadedPlugins.failed },
   // The deep mind: whole tasks to the Claude Code harness, tools MCP-bridged.
   // Default on when thinking via CLI; SQUIDCLAW_DEEP=0 opts out.
   deep:
@@ -58,6 +72,7 @@ surface = new TelegramSurface(process.env.TELEGRAM_BOT_TOKEN!, (chatId, text, pr
   platform.handle("telegram", chatId, text, progress),
 );
 await surface.start();
+for (const pluginSurface of loadedPlugins.surfaces) await pluginSurface.start();
 
 // The second face: same platform, same tenants — /join works from WhatsApp too.
 let whatsapp: WhatsAppSurface | undefined;
