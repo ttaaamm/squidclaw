@@ -19,35 +19,42 @@ set -euo pipefail
 DIR="${SQUIDCLAW_VECTORS_DIR:-/opt/llama-embed}"
 REPO="${SQUIDCLAW_EMBED_REPO:-nomic-ai/nomic-embed-text-v1.5-GGUF}"
 PORT="${SQUIDCLAW_EMBED_PORT:-8322}"
+# Who the SERVICE runs as (the platform's own user) — separate from
+# whoever is running this install script, which needs root for apt/systemd.
+SERVICE_USER="${SQUIDCLAW_SERVICE_USER:-squidclaw}"
 
 echo "🧭 growing vector memory in $DIR (model: $REPO)…"
 if command -v apt-get >/dev/null; then
-  sudo apt-get install -y -q cmake g++ git curl >/dev/null
+  apt-get install -y -q cmake g++ git curl >/dev/null
 fi
 
 if [ ! -d "$DIR/.git" ]; then
-  sudo mkdir -p "$DIR" && sudo chown "$(whoami)" "$DIR"
+  mkdir -p "$DIR"
   git clone --depth 1 https://github.com/ggml-org/llama.cpp "$DIR"
 fi
 
 cd "$DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CURL=ON >/dev/null
 cmake --build build -j "$(nproc)" --target llama-server
-chmod -R a+rX "$DIR"
 BIN="$DIR/build/bin/llama-server"
 
+# The model cache and the whole tree must be writable/readable by whoever
+# the service runs as — llama-server downloads the model as that user.
+mkdir -p "$DIR/.cache"
+chown -R "$SERVICE_USER" "$DIR" 2>/dev/null || chmod -R a+rwX "$DIR"
+
 echo ""
-echo "Setting up the service (this also downloads the model on first start — be patient)…"
+echo "Setting up the service (runs as $SERVICE_USER; also downloads the model on first start — be patient)…"
 SERVICE=/etc/systemd/system/squidclaw-embeddings.service
-sudo tee "$SERVICE" >/dev/null <<EOF
+cat > "$SERVICE" <<EOF
 [Unit]
 Description=SquidClaw vector memory — llama.cpp embedding server, model held hot
 After=network.target
 
 [Service]
 Type=simple
-User=$(whoami)
-Environment=HOME=$HOME
+User=$SERVICE_USER
+Environment=HOME=$DIR/.cache
 ExecStart=$BIN -hf $REPO --embedding --host 127.0.0.1 --port $PORT -t $(nproc)
 Restart=always
 RestartSec=5
@@ -55,8 +62,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo systemctl daemon-reload
-sudo systemctl enable --now squidclaw-embeddings
+systemctl daemon-reload
+systemctl enable --now squidclaw-embeddings
 
 echo "Waiting for the model to load (first run downloads it — can take a minute)…"
 for i in $(seq 1 60); do
