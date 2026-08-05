@@ -25,7 +25,10 @@ SERVICE_USER="${SQUIDCLAW_SERVICE_USER:-squidclaw}"
 
 echo "🧭 growing vector memory in $DIR (model: $REPO)…"
 if command -v apt-get >/dev/null; then
-  apt-get install -y -q cmake g++ git curl >/dev/null
+  # libssl-dev is not optional: the -hf Hugging Face resolver needs
+  # HTTPS. Without it, cmake configures "successfully" (a silent warning,
+  # not an error) and llama-server crash-loops forever at runtime instead.
+  apt-get install -y -q cmake g++ git curl libssl-dev >/dev/null
 fi
 
 if [ ! -d "$DIR/.git" ]; then
@@ -34,7 +37,12 @@ if [ ! -d "$DIR/.git" ]; then
 fi
 
 cd "$DIR"
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CURL=ON >/dev/null
+CONFIG_LOG=$(cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CURL=ON -DLLAMA_OPENSSL=ON 2>&1)
+if echo "$CONFIG_LOG" | grep -qi 'openssl.*not found\|https support disabled'; then
+  echo "⚠️ OpenSSL not found even after installing libssl-dev — the -hf downloader will not work."
+  echo "$CONFIG_LOG" | grep -i openssl
+  exit 1
+fi
 cmake --build build -j "$(nproc)" --target llama-server
 BIN="$DIR/build/bin/llama-server"
 
