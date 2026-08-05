@@ -104,6 +104,10 @@ export const PAGE = String.raw`<!doctype html>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from '/assets/orbit.js';
+import { EffectComposer } from '/assets/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from '/assets/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '/assets/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from '/assets/jsm/postprocessing/OutputPass.js';
 
 const STATIC = location.search.includes('static');
 const $ = (s, r=document) => r.querySelector(s);
@@ -141,10 +145,21 @@ controls.addEventListener('start', () => {
   idleTimer = setTimeout(() => { controls.autoRotate = !STATIC; }, 20000);
 });
 
+// Bloom, kept deliberately subtle — an earlier pass over the glow sprites
+// themselves already got dialed back once ("too much glowy effect"); this
+// is a soft threshold-only lift on the brightest points, not a redo of that.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.4, 0.22);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
 function resize() {
   renderer.setSize(innerWidth, innerHeight);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  composer.setSize(innerWidth, innerHeight);
+  bloomPass.setSize(innerWidth, innerHeight);
 }
 resize(); addEventListener('resize', resize);
 
@@ -335,8 +350,9 @@ async function loadCluster(name) {
     const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(20));
     const mat = new THREE.LineBasicMaterial({ color: 0x4fa8e8, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
     const line = new THREE.Line(geo, mat);
-    cluster.add(line);
-    edgeObjs.push({ from: e.from, to: e.to, mat, curve });
+    const signal = sprite(TEX.amber, 1.3, 0);
+    cluster.add(line, signal);
+    edgeObjs.push({ from: e.from, to: e.to, mat, curve, signal, live: false });
   }
   cluster.visible = false;
   brain.add(cluster);
@@ -376,6 +392,10 @@ async function applyStatuses(name) {
     const firedEdge = (a.status === 'ok') && (b.status === 'ok' || b.status === 'error' || b.status === 'running');
     eo.mat.color.set(b.status === 'error' ? 0xff5c7a : firedEdge ? 0x7fd8ff : 0x4fa8e8);
     eo.mat.opacity = firedEdge ? 0.7 : 0.22;
+    // A signal only actively races while the downstream step is the live
+    // frontier — its parent already fired, it hasn't landed yet.
+    eo.live = a.status === 'ok' && b.status === 'running';
+    if (!eo.live) eo.signal.material.opacity = 0;
   }
 }
 
@@ -530,25 +550,50 @@ function animate() {
       for (const [, obj] of n.cluster.steps) {
         if (obj.pulsing) { obj.sprite.scale.setScalar(2.1 * (1 + Math.sin(t * 6) * 0.3)); obj.halo.scale.setScalar(4.6 * (1 + Math.sin(t * 6) * 0.2)); }
       }
+      // Signals racing along synapses that are live right now, same
+      // technique as the outer dendrite's signal — just a shorter curve.
+      for (const eo of n.cluster.edges) {
+        if (!eo.live) continue;
+        eo.signal.material.opacity = 0.85;
+        eo.signal.position.copy(eo.curve.getPoint((t * 0.9 + hashOf(eo.from + eo.to) % 10 / 10) % 1));
+      }
     } else if (d < 60) loadCluster(name);
   }
 
-  // Labels follow their objects through space.
+  // Labels follow their objects through space, nudged apart when crowded —
+  // a zoomed cluster can pack a dozen step labels into a small screen area.
   const v = new THREE.Vector3();
+  const targets = [];
   for (const l of labels) {
     l.obj.getWorldPosition(v);
     const d = camera.position.distanceTo(v);
     v.project(camera);
     const visible = v.z < 1 && d >= l.minDist && d <= l.maxDist;
-    l.el.style.display = visible ? 'block' : 'none';
-    if (visible) {
-      l.el.style.left = ((v.x + 1) / 2 * innerWidth) + 'px';
-      l.el.style.top = ((-v.y + 1) / 2 * innerHeight + 14) + 'px';
-      l.el.style.opacity = Math.max(0.25, Math.min(1, 90 / d));
+    if (!visible) { l.el.style.display = 'none'; continue; }
+    targets.push({ l, d, x: (v.x + 1) / 2 * innerWidth, y: (-v.y + 1) / 2 * innerHeight + 14 });
+  }
+  // Nearest (most in-focus) label claims its natural spot first; anything
+  // that would overlap an already-claimed spot nudges downward to clear it.
+  targets.sort((a, b) => a.d - b.d);
+  const placed = [];
+  for (const tgt of targets) {
+    const text = tgt.l.el.textContent || '';
+    const w = Math.min(150, Math.max(28, text.length * 6));
+    const h = tgt.l.el.querySelector('small') ? 26 : 14;
+    let y = tgt.y;
+    for (let tries = 0; tries < 6; tries++) {
+      const collides = placed.some(p => Math.abs(p.x - tgt.x) < (p.w + w) / 2 && Math.abs(p.y - y) < (p.h + h) / 2);
+      if (!collides) break;
+      y += h + 3;
     }
+    placed.push({ x: tgt.x, y, w, h });
+    tgt.l.el.style.display = 'block';
+    tgt.l.el.style.left = tgt.x + 'px';
+    tgt.l.el.style.top = y + 'px';
+    tgt.l.el.style.opacity = Math.max(0.25, Math.min(1, 90 / tgt.d));
   }
 
-  renderer.render(scene, camera);
+  composer.render();
   frames++;
   if (!STATIC || frames < 45) requestAnimationFrame(animate);
 }

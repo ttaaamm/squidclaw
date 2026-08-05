@@ -15,10 +15,11 @@ import type { Graph } from "@squidclaw/kernel";
 
 const requireFrom = createRequire(import.meta.url);
 const threeBuild = dirname(requireFrom.resolve("three"));
+const jsmRoot = join(threeBuild, "..", "examples", "jsm");
 const ASSETS: Record<string, string> = {
   "/assets/three.js": join(threeBuild, "three.module.min.js"),
   "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
-  "/assets/orbit.js": join(threeBuild, "..", "examples", "jsm", "controls", "OrbitControls.js"),
+  "/assets/orbit.js": join(jsmRoot, "controls", "OrbitControls.js"),
 };
 
 const step = (id: string, n8nName: string) => ({ id, node: "n8n.step", params: { n8nName, __flow: "post" } });
@@ -96,10 +97,22 @@ const server = createServer((req, res) => {
   const url = req.url ?? "/";
   const json = (body: unknown) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); };
   if (url.startsWith("/assets/")) {
-    const asset = ASSETS[url.split("?")[0]];
-    if (!asset) { res.statusCode = 404; return res.end("no asset"); }
-    res.setHeader("content-type", "text/javascript");
-    return res.end(readFileSync(asset));
+    const clean = url.split("?")[0];
+    const asset = ASSETS[clean];
+    if (asset) {
+      res.setHeader("content-type", "text/javascript");
+      return res.end(readFileSync(asset));
+    }
+    if (clean.startsWith("/assets/jsm/")) {
+      const full = join(jsmRoot, clean.slice("/assets/jsm/".length));
+      if (full.startsWith(jsmRoot)) {
+        try {
+          res.setHeader("content-type", "text/javascript");
+          return res.end(readFileSync(full));
+        } catch { /* fall through to 404 */ }
+      }
+    }
+    res.statusCode = 404; return res.end("no asset");
   }
   if (url === "/" || url.startsWith("/?")) {
     // The page handles ?static itself: no SSE, render 45 frames, stop.

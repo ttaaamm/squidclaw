@@ -10,10 +10,11 @@ import { safeEqual } from "@squidclaw/tenants";
 const requireFrom = createRequire(import.meta.url);
 /** The vendored 3D engine, resolved from node_modules at serve time. */
 const threeBuild = dirname(requireFrom.resolve("three"));
+const jsmRoot = join(threeBuild, "..", "examples", "jsm");
 const ASSETS: Record<string, string> = {
   "/assets/three.js": join(threeBuild, "three.module.min.js"),
   "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
-  "/assets/orbit.js": join(threeBuild, "..", "examples", "jsm", "controls", "OrbitControls.js"),
+  "/assets/orbit.js": join(jsmRoot, "controls", "OrbitControls.js"),
 };
 
 export interface DashboardOptions {
@@ -91,9 +92,24 @@ export class DashboardServer {
     // Assets carry no data, so they sit outside auth.
     if (path.startsWith("/assets/")) {
       const asset = ASSETS[path];
-      if (!asset) return this.send(res, 404, { error: "no such asset" });
-      res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
-      return void res.end(readFileSync(asset));
+      if (asset) {
+        res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
+        return void res.end(readFileSync(asset));
+      }
+      // Post-processing modules (bloom, etc.) cross-import each other by
+      // relative path, so the whole jsm tree is served under one prefix
+      // instead of listing every file the way the single-file assets are.
+      if (path.startsWith("/assets/jsm/")) {
+        const full = join(jsmRoot, path.slice("/assets/jsm/".length));
+        if (!full.startsWith(jsmRoot)) return this.send(res, 404, { error: "no such asset" });
+        try {
+          res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
+          return void res.end(readFileSync(full));
+        } catch {
+          return this.send(res, 404, { error: "no such asset" });
+        }
+      }
+      return this.send(res, 404, { error: "no such asset" });
     }
 
     // The door: a one-time code becomes a 30-day session cookie.
