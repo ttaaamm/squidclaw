@@ -7,20 +7,10 @@
  */
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import { PAGE } from "../packages/canvas/src/page.js";
 import { layoutRadial } from "../packages/canvas/src/layout.js";
+import { resolveAssetPath } from "../packages/canvas/src/assets.js";
 import type { Graph } from "@squidclaw/kernel";
-
-const requireFrom = createRequire(import.meta.url);
-const threeBuild = dirname(requireFrom.resolve("three"));
-const jsmRoot = join(threeBuild, "..", "examples", "jsm");
-const ASSETS: Record<string, string> = {
-  "/assets/three.js": join(threeBuild, "three.module.min.js"),
-  "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
-  "/assets/orbit.js": join(jsmRoot, "controls", "OrbitControls.js"),
-};
 
 const step = (id: string, n8nName: string) => ({ id, node: "n8n.step", params: { n8nName, __flow: "post" } });
 const GRAPH: Graph = {
@@ -97,22 +87,14 @@ const server = createServer((req, res) => {
   const url = req.url ?? "/";
   const json = (body: unknown) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(body)); };
   if (url.startsWith("/assets/")) {
-    const clean = url.split("?")[0];
-    const asset = ASSETS[clean];
-    if (asset) {
+    const asset = resolveAssetPath(url.split("?")[0]);
+    if (!asset) { res.statusCode = 404; return res.end("no asset"); }
+    try {
       res.setHeader("content-type", "text/javascript");
       return res.end(readFileSync(asset));
+    } catch {
+      res.statusCode = 404; return res.end("no asset");
     }
-    if (clean.startsWith("/assets/jsm/")) {
-      const full = join(jsmRoot, clean.slice("/assets/jsm/".length));
-      if (full.startsWith(jsmRoot)) {
-        try {
-          res.setHeader("content-type", "text/javascript");
-          return res.end(readFileSync(full));
-        } catch { /* fall through to 404 */ }
-      }
-    }
-    res.statusCode = 404; return res.end("no asset");
   }
   if (url === "/" || url.startsWith("/?")) {
     // The page handles ?static itself: no SSE, render 45 frames, stop.

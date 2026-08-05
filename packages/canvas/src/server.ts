@@ -1,21 +1,10 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
 import { layoutRadial } from "./layout.js";
 import { dashboardState, executionDetail, executionList, type Sources } from "./api.js";
 import { PAGE } from "./page.js";
+import { resolveAssetPath } from "./assets.js";
 import { safeEqual } from "@squidclaw/tenants";
-
-const requireFrom = createRequire(import.meta.url);
-/** The vendored 3D engine, resolved from node_modules at serve time. */
-const threeBuild = dirname(requireFrom.resolve("three"));
-const jsmRoot = join(threeBuild, "..", "examples", "jsm");
-const ASSETS: Record<string, string> = {
-  "/assets/three.js": join(threeBuild, "three.module.min.js"),
-  "/assets/three.core.min.js": join(threeBuild, "three.core.min.js"),
-  "/assets/orbit.js": join(jsmRoot, "controls", "OrbitControls.js"),
-};
 
 export interface DashboardOptions {
   /** How often to look for new executions to push to open pages. */
@@ -91,25 +80,14 @@ export class DashboardServer {
     // Self-hosted three.js — the brain renders offline, no CDN, no build.
     // Assets carry no data, so they sit outside auth.
     if (path.startsWith("/assets/")) {
-      const asset = ASSETS[path];
-      if (asset) {
+      const asset = resolveAssetPath(path);
+      if (!asset) return this.send(res, 404, { error: "no such asset" });
+      try {
         res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
         return void res.end(readFileSync(asset));
+      } catch {
+        return this.send(res, 404, { error: "no such asset" });
       }
-      // Post-processing modules (bloom, etc.) cross-import each other by
-      // relative path, so the whole jsm tree is served under one prefix
-      // instead of listing every file the way the single-file assets are.
-      if (path.startsWith("/assets/jsm/")) {
-        const full = join(jsmRoot, path.slice("/assets/jsm/".length));
-        if (!full.startsWith(jsmRoot)) return this.send(res, 404, { error: "no such asset" });
-        try {
-          res.writeHead(200, { "content-type": "text/javascript", "cache-control": "public, max-age=86400" });
-          return void res.end(readFileSync(full));
-        } catch {
-          return this.send(res, 404, { error: "no such asset" });
-        }
-      }
-      return this.send(res, 404, { error: "no such asset" });
     }
 
     // The door: a one-time code becomes a 30-day session cookie.
