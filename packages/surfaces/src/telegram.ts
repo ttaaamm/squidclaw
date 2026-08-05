@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { Bot, type Context } from "grammy";
 import type { UserFromGetMe } from "grammy/types";
 import type { ChatSurface, MessageHandler } from "./surface.js";
+import { chunkMessage } from "./chunk.js";
 
 export interface TelegramSurfaceOptions {
   botInfo?: UserFromGetMe;
@@ -151,10 +152,13 @@ export class TelegramSurface implements ChatSurface {
       const reply = await this.onMessage(String(chatId), text, progress);
       await clearDraft();
       if (!reply) return; // the flow spoke for itself
-      await ctx.reply(reply);
+      // Telegram rejects anything over ~4096 chars outright — a long
+      // legitimate answer must arrive as several messages, not vanish.
+      for (const chunk of chunkMessage(reply)) await ctx.reply(chunk);
     } catch (err) {
       await clearDraft();
-      await ctx.reply(`⚠️ ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      for (const chunk of chunkMessage(`⚠️ ${message}`)) await ctx.reply(chunk);
     } finally {
       clearInterval(heartbeat);
     }

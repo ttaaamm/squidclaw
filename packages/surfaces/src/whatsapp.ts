@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ChatSurface, MessageHandler } from "./surface.js";
+import { chunkMessage } from "./chunk.js";
 
 /**
  * The WhatsApp face — via Baileys, the same library legacy trusts.
@@ -124,7 +125,7 @@ export class WhatsAppSurface implements ChatSurface {
   /** Unsolicited pushes — reflex firings, commitments, channel docking. */
   async send(chatId: string, text: string): Promise<void> {
     if (!this.socket) throw new Error("whatsapp: not connected yet");
-    await this.socket.sendText(chatId, text);
+    for (const chunk of chunkMessage(text)) await this.socket.sendText(chatId, chunk);
   }
 
   async start(): Promise<void> {
@@ -157,9 +158,10 @@ export class WhatsAppSurface implements ChatSurface {
     try {
       const reply = await this.onMessage(msg.chatId, msg.text, progress);
       if (!reply) return; // the flow spoke for itself
-      await socket.sendText(msg.chatId, reply);
+      for (const chunk of chunkMessage(reply)) await socket.sendText(msg.chatId, chunk);
     } catch (err) {
-      await socket.sendText(msg.chatId, `⚠️ ${err instanceof Error ? err.message : String(err)}`).catch(() => {});
+      const message = err instanceof Error ? err.message : String(err);
+      for (const chunk of chunkMessage(`⚠️ ${message}`)) await socket.sendText(msg.chatId, chunk).catch(() => {});
     } finally {
       clearInterval(heartbeat);
       void socket.typing(msg.chatId, false).catch(() => {});

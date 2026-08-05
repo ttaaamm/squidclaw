@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CliBrain, parseDecision } from "@squidclaw/brains";
+import { CliBrain, parseDecision, sanitizeExecError } from "@squidclaw/brains";
 
 describe("cli brain (thinks on the human's subscription)", () => {
   it("turns a structured decision into a tool call", async () => {
@@ -71,5 +71,40 @@ describe("decision parsing survives noisy CLI output", () => {
     const d = parseDecision("just some text");
     expect(d.action).toBe("reply");
     expect(d.reply).toBe("just some text");
+  });
+});
+
+/**
+ * A real incident: the CLI failed, and execFile's own error carried the
+ * ENTIRE command line — prompt, tool list, system prompt — in `.message`.
+ * That text became the reply, was journaled as conversation history, and
+ * fed the next turn, until an outgoing message was too long for Telegram
+ * to send at all ("400: message is too long") and the human saw nothing.
+ */
+describe("a failed CLI invocation", () => {
+  it("never leaks the prompt or command line into the error the human can see", () => {
+    const secretPrompt = "You have these tools: " + "x".repeat(50_000);
+    const err = Object.assign(new Error(`Command failed: claude -p ${secretPrompt}`), {
+      code: 1,
+      stderr: "claude: command not found",
+    });
+
+    const clean = sanitizeExecError(err);
+    expect(clean.message).not.toContain("x".repeat(100));
+    expect(clean.message).toContain("claude: command not found");
+    expect(clean.message).toContain("exit 1");
+    expect(clean.message.length).toBeLessThan(700);
+  });
+
+  it("caps a huge stderr too, rather than trusting it to be small", () => {
+    const clean = sanitizeExecError({ code: 2, stderr: "boom ".repeat(5_000) });
+    expect(clean.message.length).toBeLessThan(700);
+    expect(clean.message).toContain("[trimmed]");
+  });
+
+  it("still says something useful when there is no stderr at all", () => {
+    const clean = sanitizeExecError(Object.assign(new Error("timed out"), { signal: "SIGTERM" }));
+    expect(clean.message).toContain("SIGTERM");
+    expect(clean.message).toContain("timed out");
   });
 });

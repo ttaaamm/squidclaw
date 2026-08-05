@@ -395,7 +395,8 @@ export class Agent {
     if (this.opts.deep) {
       try {
         return await this.deepRun(text, chatId, onProgress, meta);
-      } catch {
+      } catch (err) {
+        console.error(`[agent:${this.opts.tenantId}] deep run failed, falling back to classic loop:`, err);
         onProgress?.("deep mind unavailable — thinking step by step…");
         // fall through to the classic loop
       }
@@ -710,6 +711,7 @@ export class Agent {
       }
       return reply;
     } catch (err) {
+      console.error(`[agent:${tenantId}] classic run failed:`, err);
       journal.setGraph(execId, graph);
       journal.finish(execId, "error");
       return `Something went wrong: ${String(err)}`;

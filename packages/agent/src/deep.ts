@@ -9,6 +9,24 @@ import type { Item, NodeDef } from "@squidclaw/kernel";
 
 const run = promisify(execFile);
 
+const EXEC_ERROR_CHARS = 500;
+
+/**
+ * A failed `execFile` call's own error embeds the ENTIRE command line — the
+ * whole prompt, tool list, and system prompt, sometimes tens of KB — in its
+ * `.message`. Left raw, that text becomes the "reply" this run hands back
+ * (and gets journaled as conversation history), snowballing into every
+ * later turn's context. The full detail still reaches the logs.
+ */
+function sanitizeExecError(err: unknown): Error {
+  const e = err as { code?: number | string; signal?: string; stderr?: string; message?: string };
+  console.error("[deep] claude CLI invocation failed:", e.stderr || e.message || err);
+  const detail = (e.stderr ?? "").trim() || String(e.message ?? err);
+  const short = detail.length > EXEC_ERROR_CHARS ? `${detail.slice(0, EXEC_ERROR_CHARS)}… [trimmed]` : detail;
+  const where = [e.code != null ? `exit ${e.code}` : null, e.signal ? `signal ${e.signal}` : null].filter(Boolean).join(", ");
+  return new Error(`claude CLI failed${where ? ` (${where})` : ""}: ${short || "no output"}`);
+}
+
 /**
  * The deep mind: instead of our loop deciding one step at a time, the whole
  * task is handed to the Claude Code harness — real planning, multi-step
@@ -209,8 +227,13 @@ export async function runClaudeDeep(opts: {
 }): Promise<string> {
   const exec =
     opts.deep.exec ??
-    (async (args: string[], timeoutMs: number) =>
-      (await run("claude", args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 })).stdout);
+    (async (args: string[], timeoutMs: number) => {
+      try {
+        return (await run("claude", args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 })).stdout;
+      } catch (err) {
+        throw sanitizeExecError(err);
+      }
+    });
 
   const raw = await exec(
     [

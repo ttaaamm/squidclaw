@@ -4,6 +4,27 @@ import type { CompleteRequest, CompleteResult, Mind, ToolSpec } from "./router.j
 
 const run = promisify(execFile);
 
+const EXEC_ERROR_CHARS = 500;
+
+/**
+ * A failed `execFile` call's own error embeds the ENTIRE command line — the
+ * whole prompt, tool list, and system prompt, sometimes tens of KB — in its
+ * `.message`. Left raw, that text ends up as a reply, gets fed back into the
+ * next turn's history, or gets handed to fact-extraction as if it were a
+ * real exchange — each of which is how one CLI hiccup snowballs into every
+ * later turn's context (and, eventually, an outgoing message too long for
+ * the chat platform to even send). The full detail still reaches the logs,
+ * just not the conversation.
+ */
+export function sanitizeExecError(err: unknown): Error {
+  const e = err as { code?: number | string; signal?: string; stderr?: string; message?: string };
+  console.error("[cli-brain] claude CLI invocation failed:", e.stderr || e.message || err);
+  const detail = (e.stderr ?? "").trim() || String(e.message ?? err);
+  const short = detail.length > EXEC_ERROR_CHARS ? `${detail.slice(0, EXEC_ERROR_CHARS)}… [trimmed]` : detail;
+  const where = [e.code != null ? `exit ${e.code}` : null, e.signal ? `signal ${e.signal}` : null].filter(Boolean).join(", ");
+  return new Error(`claude CLI failed${where ? ` (${where})` : ""}: ${short || "no output"}`);
+}
+
 /**
  * A brain that thinks through the Claude CLI instead of the API.
  *
@@ -71,8 +92,12 @@ export class CliBrain implements Mind {
     this.exec =
       opts.exec ??
       (async (args, timeoutMs) => {
-        const { stdout } = await run("claude", args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
-        return stdout;
+        try {
+          const { stdout } = await run("claude", args, { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+          return stdout;
+        } catch (err) {
+          throw sanitizeExecError(err);
+        }
       });
   }
 
