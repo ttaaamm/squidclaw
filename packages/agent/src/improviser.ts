@@ -317,7 +317,7 @@ export class Agent {
   }
 
   /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
-  private systemPrompt(chatId: string, surface?: string, messageText?: string): string {
+  private async systemPrompt(chatId: string, surface?: string, messageText?: string): Promise<string> {
     const parts = [this.opts.innerMe, BEHAVIOR];
 
     // Situational awareness: an agent that doesn't know the date feels broken.
@@ -341,7 +341,7 @@ export class Agent {
       // surfaces the one that matters for THIS message ("ssh again" finds
       // the memory that says how, even if it was written weeks ago).
       const CORE = new Set(["my-human", "my-purpose"]);
-      const relevant = messageText ? (this.opts.memory?.recall(messageText, { limit: MEMORY_DIGEST_LIMIT }) ?? []) : [];
+      const relevant = messageText ? ((await this.opts.memory?.recall(messageText, { limit: MEMORY_DIGEST_LIMIT })) ?? []) : [];
       const chosen: typeof known = [];
       const chosenNames = new Set<string>();
       const add = (m: (typeof known)[number]) => {
@@ -419,7 +419,7 @@ export class Agent {
       const res = await brains.complete({
         tier: "cheap",
         system:
-          this.systemPrompt(chatId, meta?.surface, text) +
+          await this.systemPrompt(chatId, meta?.surface, text) +
           "\n\n## Fast lane\nYou are the FAST LANE — answer instantly, WITHOUT any tools. " +
           "If this message needs a tool, a flow, a file, the web, publishing, remembering something new, " +
           "or any multi-step work — or you are not fully confident — reply with EXACTLY <ESCALATE> and nothing else. " +
@@ -495,7 +495,7 @@ export class Agent {
       const reply = await runClaudeDeep({
         deep,
         prompt,
-        system: this.systemPrompt(chatId, meta?.surface, text),
+        system: await this.systemPrompt(chatId, meta?.surface, text),
         mcpConfigPath: writeMcpConfig(deep.shimPath, bridge),
       });
 
@@ -590,7 +590,7 @@ export class Agent {
         onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
         const res = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface, text),
+          system: await this.systemPrompt(chatId, meta?.surface, text),
           messages,
           tools,
         });
@@ -662,7 +662,7 @@ export class Agent {
         onProgress?.("wrapping up…");
         const final = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface, text),
+          system: await this.systemPrompt(chatId, meta?.surface, text),
           messages: [
             ...messages,
             {
@@ -688,7 +688,7 @@ export class Agent {
         onProgress?.("answering your follow-up too…");
         const more = await brains.complete({
           tier: "strong",
-          system: this.systemPrompt(chatId, meta?.surface, text),
+          system: await this.systemPrompt(chatId, meta?.surface, text),
           messages,
         });
         reply = [reply, cleanReply(more.text)].filter(Boolean).join("\n\n");

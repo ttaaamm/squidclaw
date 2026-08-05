@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { Journal } from "@squidclaw/kernel";
 import { extractTextFromFile, registerBuiltinNodes, registerMcpServers, type McpConfig } from "@squidclaw/nodes";
 import { Brains, CliBrain, loadBrainsConfig, type Mind } from "@squidclaw/brains";
-import { ConversationStore, KnowledgeBase, Profiles, SemanticMemory, knowledgeNodes, profileNodes, registerMemoryNodes, taskList, taskNodes } from "@squidclaw/memory";
+import { ConversationStore, KnowledgeBase, Profiles, SemanticMemory, embedViaServer, knowledgeNodes, profileNodes, registerMemoryNodes, taskList, taskNodes, type Embedder } from "@squidclaw/memory";
 import { Agent, FlowStore, VibeState, heal, loadVibes, paramSpecs, type Flow } from "@squidclaw/agent";
 import { ReflexStore, Scheduler, WebhookServer, reminderNodes } from "@squidclaw/reflexes";
 import { listNodes, type ExecutionRecord } from "@squidclaw/kernel";
@@ -23,6 +23,17 @@ export function chooseMind(workspace: string): { mind: Mind; via: "api" | "cli" 
     return { mind: new CliBrain(), via: "cli" };
   }
   return { mind: new Brains(loadBrainsConfig(join(workspace, "BRAINS.yaml"))), via: "api" };
+}
+
+/**
+ * True vector memory when SQUIDCLAW_EMBED_URL points at a hot local
+ * embedding server (grown via scripts/install-vectors.sh — same pattern
+ * as the ears and voice). Absent, memory stays lexical-only: correct,
+ * just word-bound rather than meaning-bound.
+ */
+export function chooseEmbedder(): Embedder | undefined {
+  const url = process.env.SQUIDCLAW_EMBED_URL;
+  return url ? embedViaServer(url) : undefined;
 }
 
 export interface Booted {
@@ -97,7 +108,7 @@ export function habitRunner(booted: Booted, notify: (message: string) => void) {
 export async function bootAgent(): Promise<Booted> {
   const workspace = process.env.SQUIDCLAW_WORKSPACE ?? join(process.cwd(), "workspace");
 
-  const memory = new SemanticMemory(join(workspace, "memory"));
+  const memory = new SemanticMemory(join(workspace, "memory"), { embed: chooseEmbedder() });
   registerBuiltinNodes();
   registerMemoryNodes(memory);
 

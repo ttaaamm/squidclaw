@@ -26,7 +26,7 @@ describe("the passive ear (fact extraction)", () => {
     await agent.handleMessage("my brother Omar is visiting tomorrow");
     await flush();
 
-    expect(memory.recall("omar")[0]?.content).toContain("Omar");
+    expect((await memory.recall("omar"))[0]?.content).toContain("Omar");
   });
 
   it("a broken extraction never breaks the conversation", async () => {

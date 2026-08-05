@@ -91,14 +91,14 @@ describe("memory decay", () => {
     expect(existsSync(join(d, "_archive", "old-fact.md"))).toBe(true); // recoverable, not deleted
   });
 
-  it("being recalled keeps a memory alive", () => {
+  it("being recalled keeps a memory alive", async () => {
     const d = dir();
     const memory = new SemanticMemory(d);
     memory.remember("used-fact", "recalled often");
     const old = new Date(Date.now() - 90 * 86_400_000).toISOString();
     writeFileSync(join(d, ".meta.json"), JSON.stringify({ "used-fact": { createdAt: old } }));
 
-    memory.recall("recalled"); // touch it
+    await memory.recall("recalled"); // touch it
     expect(memory.decay({ maxAgeDays: 45 })).toEqual([]);
   });
 });

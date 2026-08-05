@@ -17,7 +17,7 @@ import { ReflexStore, Scheduler, parseWhen, reminderNodes } from "@squidclaw/ref
 import { AgentPool, LoginStore, TenantStore, PLANS, safeEqual, type Tenant } from "@squidclaw/tenants";
 import type { Sources } from "@squidclaw/canvas";
 import { MARKETPLACE } from "@squidclaw/sdk";
-import { habitRunner, handleCommand, type Booted } from "./boot.js";
+import { chooseEmbedder, habitRunner, handleCommand, type Booted } from "./boot.js";
 
 export interface PlatformOptions {
   /** The shared root; each tenant's body grows under <root>/tenants/<id>. */
@@ -110,7 +110,9 @@ export class Platform {
     if (!existsSync(innerMePath)) copyFileSync(join(this.opts.root, "INNERME.md"), innerMePath);
 
     const vibesPath = join(this.opts.root, "VIBES.yaml");
-    const memory = new SemanticMemory(join(dir, "memory"));
+    // One embedder, shared across tenants — the model is a fixed cost of
+    // the box, not per-tenant; only the memories it scores differ.
+    const memory = new SemanticMemory(join(dir, "memory"), { embed: chooseEmbedder() });
     const flows = new FlowStore(join(dir, "flows"));
     const reflexes = new ReflexStore(join(dir, "reflexes"));
     const journal = new Journal(join(dir, "journal", "executions.db"));
@@ -751,6 +753,22 @@ if (sub === "scopes") {
       if (existsSync(process.env.SQUIDCLAW_PIPER_BIN)) ok("voice: built-in (local piper)");
       else warn("voice configured but piper binary missing — rerun scripts/install-voice.sh");
     } else warn("voice via cloud fallback — bash scripts/install-voice.sh grows a built-in one");
+
+    // Memory: lexical always works; vector (meaning-based) recall is the
+    // upgrade — a live probe, not just an env check, since a wedged
+    // embedding server is worse than none (silent word-only fallback).
+    if (process.env.SQUIDCLAW_EMBED_URL) {
+      try {
+        const probe = await fetch(`${process.env.SQUIDCLAW_EMBED_URL}/v1/embeddings`, {
+          method: "POST", headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input: "doctor probe" }), signal: AbortSignal.timeout(8000),
+        });
+        if (probe.ok) ok("memory: vector (local embeddings) + lexical");
+        else warn(`memory: embedding server answered HTTP ${probe.status} — recall falls back to lexical-only`);
+      } catch {
+        warn("memory: embedding server unreachable — recall falls back to lexical-only");
+      }
+    } else warn("memory: lexical only — bash scripts/install-vectors.sh adds meaning-based recall");
 
     if (process.env.INSTAGRAM_ACCESS_TOKEN && process.env.INSTAGRAM_ACCOUNT_ID) ok("instagram connected");
     else lines.push("◦ instagram not connected (INSTAGRAM_ACCESS_TOKEN / INSTAGRAM_ACCOUNT_ID)");

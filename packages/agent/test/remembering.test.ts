@@ -90,6 +90,6 @@ describe("the agent remembers", () => {
     const reply = await agent.handleMessage("never deploy without asking me first");
 
     expect(reply).toContain("ask first");
-    expect(memory.recall("deploy")[0].content).toContain("explicit approval");
+    expect((await memory.recall("deploy"))[0].content).toContain("explicit approval");
   });
 });

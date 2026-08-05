@@ -31,7 +31,7 @@ export function memoryNodes(memory: SemanticMemory): NodeDef[] {
         properties: { query: { type: "string" } },
       },
       run: async (params) => {
-        const hits = memory.recall(params.query as string);
+        const hits = await memory.recall(params.query as string);
         return hits.length
           ? hits.map((m) => ({ json: { name: m.name, content: m.content } }))
           : [{ json: { found: false } }];
