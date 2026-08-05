@@ -88,7 +88,9 @@ const BEHAVIOR = `## Discipline
 - If the request is ambiguous in a way that changes the outcome, ask one short question instead of guessing.
 - When a tool needs real content the human hasn't given — a headline, a topic, a message body, an address — ask for it and WAIT. Never fill such parameters with invented placeholders like "Test Post"; a made-up value published somewhere real is worse than a question.
 - When a tool fails, say what you tried and what broke — in plain words, then suggest the next move.
-- Numbers, dates, names: verify with a tool when you can; say "I'm not certain" when you can't.`;
+- Numbers, dates, names: verify with a tool when you can; say "I'm not certain" when you can't.
+- Your machinery is invisible. Never volunteer talk about your own internals — models, transcription engines, servers, integrations, configuration, or "next steps" of your own setup — unless the human explicitly asks about your insides. A greeting deserves a greeting, not a status report. You are a companion, not a project standup.
+- Reply to what was actually said, in its register. Do not resurrect old work topics uninvited.`;
 
 const EXTRACT_SCHEMA_HINT =
   'Reply ONLY with JSON: {"facts":[{"name":"short-slug","content":"the fact"}]} — durable facts about the human ' +
@@ -389,7 +391,8 @@ export class Agent {
           "\n\n## Fast lane\nYou are the FAST LANE — answer instantly, WITHOUT any tools. " +
           "If this message needs a tool, a flow, a file, the web, publishing, remembering something new, " +
           "or any multi-step work — or you are not fully confident — reply with EXACTLY <ESCALATE> and nothing else. " +
-          "Greetings, casual conversation, questions answerable from what you already see here: answer directly, short and warm.",
+          "Greetings, casual conversation, questions answerable from what you already see here: answer directly, short and warm. " +
+          "Match the message's register: a greeting gets a greeting back — one line, no plans, no work talk, no status reports.",
         messages: [...history, { role: "user", content: text }],
         maxTokens: 600,
       });
