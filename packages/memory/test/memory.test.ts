@@ -48,6 +48,28 @@ describe("semantic memory (what it knows)", () => {
     expect(m.recall("nothing here")).toEqual([]);
   });
 
+  it("finds a fuzzy query no substring match would — 'ssh again' against a note that never says 'again'", () => {
+    const m = new SemanticMemory(dir);
+    m.remember("preplix-ssh", "SSH access to 76.13.49.186 works: root, key-based auth.");
+    m.remember("unrelated", "Tamer likes his tea with mint.");
+    const hits = m.recall("ssh again");
+    expect(hits.map((h) => h.name)).toEqual(["preplix-ssh"]);
+  });
+
+  it("ranks the message-relevant memory above unrelated ones stored earlier", () => {
+    const m = new SemanticMemory(dir);
+    m.remember("aa-first-alphabetically", "The weather was nice on Tuesday.");
+    m.remember("zz-server-note", "The ash server at 76.13.49.186 runs n8n and needs sudo for the export.");
+    const hits = m.recall("how do I reach the ash server");
+    expect(hits[0].name).toBe("zz-server-note"); // relevance wins, not alphabetical order
+  });
+
+  it("gives partial credit for near-matches (ssh vs sshd) without exploding on short tokens", () => {
+    const m = new SemanticMemory(dir);
+    m.remember("sshd-note", "The sshd config on the box allows key auth only.");
+    expect(m.recall("ssh")[0].name).toBe("sshd-note");
+  });
+
   it("overwrites a memory with the same name rather than duplicating", () => {
     const m = new SemanticMemory(dir);
     m.remember("fact", "old");

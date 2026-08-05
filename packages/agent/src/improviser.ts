@@ -94,8 +94,21 @@ const BEHAVIOR = `## Discipline
 
 const EXTRACT_SCHEMA_HINT =
   'Reply ONLY with JSON: {"facts":[{"name":"short-slug","content":"the fact"}]} — durable facts about the human ' +
-  "(preferences, names, rules, relationships, plans). Not small talk, not what they asked this once. " +
+  "(preferences, names, rules, relationships, plans) OR durable facts about the WORLD this agent now knows how to " +
+  "act in (a server it can reach and how, credentials that worked, a system it's connected to, a place things " +
+  "live). If tool actions are shown, they are the ground truth — capture what actually worked (a host, a path, an " +
+  "account) even if the chat reply never spelled it out. Not small talk, not what they asked this once. " +
   'If nothing is worth keeping: {"facts":[]}';
+
+/** What actually happened, compressed for the passive ear — not what was said about it. */
+function summarizeActions(graph: Graph): string | undefined {
+  if (!graph.nodes.length) return undefined;
+  const lines = graph.nodes
+    .filter((n) => n.node !== "n8n.step") // imported-flow internals are noise here
+    .slice(-8) // the tail of a long run is what's freshest and most likely load-bearing
+    .map((n) => `- ${n.node}(${JSON.stringify(n.params).slice(0, 200)})`);
+  return lines.length ? lines.join("\n") : undefined;
+}
 
 /**
  * The improviser: thinking, recorded as a graph.
@@ -176,7 +189,7 @@ export class Agent {
    * knows you — remembering things you never told it to remember.
    * Fire-and-forget; a failed extraction must never break a conversation.
    */
-  private extractFacts(userText: string, reply: string): void {
+  private extractFacts(userText: string, reply: string, actions?: string): void {
     const { memory, brains } = this.opts;
     if (!memory || this.opts.extractFacts === false) return;
     void (async () => {
@@ -184,7 +197,12 @@ export class Agent {
         const res = await brains.complete({
           tier: "cheap",
           system: EXTRACT_SCHEMA_HINT,
-          messages: [{ role: "user", content: `HUMAN: ${userText}\nAGENT: ${reply}` }],
+          messages: [{
+            role: "user",
+            content:
+              `HUMAN: ${userText}\nAGENT: ${reply}` +
+              (actions ? `\n\nTOOLS ACTUALLY RUN (the ground truth of what happened, not just what was said):\n${actions}` : ""),
+          }],
           maxTokens: 400,
         });
         const start = res.text.indexOf("{");
@@ -317,12 +335,26 @@ export class Agent {
 
     const known = this.opts.memory?.all() ?? [];
     if (known.length) {
-      const digest = known
-        .slice(0, MEMORY_DIGEST_LIMIT)
-        .map((m) => `- ${m.name}: ${m.content.replace(/\s+/g, " ").slice(0, 200)}`)
-        .join("\n");
-      const more =
-        known.length > MEMORY_DIGEST_LIMIT ? `\n(+${known.length - MEMORY_DIGEST_LIMIT} more — use memory.recall)` : "";
+      // Active memory: identity always present; everything else ranked by
+      // relevance to what was actually just said — not by whichever file
+      // happens to sort first. A store with hundreds of entries still
+      // surfaces the one that matters for THIS message ("ssh again" finds
+      // the memory that says how, even if it was written weeks ago).
+      const CORE = new Set(["my-human", "my-purpose"]);
+      const relevant = messageText ? (this.opts.memory?.recall(messageText, { limit: MEMORY_DIGEST_LIMIT }) ?? []) : [];
+      const chosen: typeof known = [];
+      const chosenNames = new Set<string>();
+      const add = (m: (typeof known)[number]) => {
+        if (chosenNames.has(m.name) || chosen.length >= MEMORY_DIGEST_LIMIT) return;
+        chosen.push(m);
+        chosenNames.add(m.name);
+      };
+      for (const m of known) if (CORE.has(m.name)) add(m);
+      for (const m of relevant) add(m);
+      for (const m of known) add(m); // fills remaining budget; small stores show everything, as before
+
+      const digest = chosen.map((m) => `- ${m.name}: ${m.content.replace(/\s+/g, " ").slice(0, 200)}`).join("\n");
+      const more = known.length > chosen.length ? `\n(+${known.length - chosen.length} more — use memory.recall)` : "";
       parts.push(`## What I remember\n${digest}${more}`);
     }
 
@@ -471,7 +503,7 @@ export class Agent {
       journal.finish(execId, "ok");
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
-      this.extractFacts(text, reply);
+      this.extractFacts(text, reply, summarizeActions(graph));
       this.updateSummary(chatId);
 
       if (graph.nodes.length) {
@@ -668,7 +700,7 @@ export class Agent {
       conversation?.append(tenantId, chatId, "user", text);
       for (const extra of steered) conversation?.append(tenantId, chatId, "user", extra);
       conversation?.append(tenantId, chatId, "assistant", reply);
-      this.extractFacts(text, reply); // fire-and-forget: the passive ear
+      this.extractFacts(text, reply, summarizeActions(graph)); // fire-and-forget: the passive ear
       this.updateSummary(chatId); // fire-and-forget: the rolling memory of this chat
 
       // Only work that actually did something is worth remembering how to do.

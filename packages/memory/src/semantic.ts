@@ -11,6 +11,12 @@ interface MemoryMeta {
   lastRecalledAt?: string;
 }
 
+const STOPWORDS = new Set([
+  "a", "an", "the", "is", "are", "was", "were", "to", "of", "and", "or", "in", "on", "at",
+  "for", "with", "my", "your", "his", "her", "it", "its", "this", "that", "again", "please",
+  "من", "في", "على", "إلى", "هو", "هي", "أن", "لا", "ما",
+]);
+
 const slugify = (name: string) =>
   name
     .toLowerCase()
@@ -92,10 +98,58 @@ export class SemanticMemory {
       .map((f) => ({ name: f.replace(/\.md$/, ""), content: readFileSync(join(this.dir, f), "utf8").trim() }));
   }
 
-  /** Substring match over name and body — small corpora don't need embeddings. */
-  recall(query: string): Memory[] {
-    const q = query.toLowerCase();
-    const hits = this.all().filter((m) => m.name.toLowerCase().includes(q) || m.content.toLowerCase().includes(q));
+  /**
+   * Relevance search — no API, no embeddings, no network: TF-IDF scoring
+   * over the on-disk corpus. A plain substring match missed "ssh again"
+   * against a memory that says "SSH access to 76.13.49.186 works" — this
+   * scores by shared WORDS, weighted by how rare each word is across
+   * everything remembered, plus partial credit for near-matches (ssh ↔
+   * sshd). Good enough at hundreds of memories; this is a mind's notes,
+   * not a search engine's index.
+   */
+  recall(query: string, opts: { limit?: number } = {}): Memory[] {
+    const memories = this.all();
+    if (!memories.length) return [];
+
+    const tokenize = (s: string): string[] =>
+      s.toLowerCase().match(/[a-z0-9]+|[؀-ۿ]+/g)?.filter((t) => !STOPWORDS.has(t) && t.length > 1) ?? [];
+
+    const docTokens = memories.map((m) => tokenize(`${m.name} ${m.content}`));
+    const df = new Map<string, number>();
+    for (const tokens of docTokens) {
+      for (const t of new Set(tokens)) df.set(t, (df.get(t) ?? 0) + 1);
+    }
+    const idf = (t: string) => Math.log(1 + memories.length / (df.get(t) ?? 1));
+
+    const queryTokens = tokenize(query);
+    // A query too short or made entirely of stopwords still deserves an
+    // honest attempt — fall back to the raw substring behavior for it.
+    if (!queryTokens.length) {
+      const q = query.toLowerCase().trim();
+      const hits = q ? memories.filter((m) => m.name.toLowerCase().includes(q) || m.content.toLowerCase().includes(q)) : [];
+      this.touch(hits.map((m) => m.name));
+      return hits.slice(0, opts.limit);
+    }
+
+    const scored = memories.map((m, i) => {
+      const tokens = docTokens[i];
+      let score = 0;
+      for (const qt of queryTokens) {
+        const exact = tokens.filter((t) => t === qt).length;
+        if (exact) { score += exact * idf(qt); continue; }
+        // Partial credit: "ssh" inside "sshd", "server" inside "servers".
+        if (tokens.some((t) => t.length > 2 && qt.length > 2 && (t.includes(qt) || qt.includes(t)))) {
+          score += idf(qt) * 0.4;
+        }
+      }
+      return { m, score };
+    });
+
+    const hits = scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, opts.limit)
+      .map((s) => s.m);
     this.touch(hits.map((m) => m.name)); // being recalled is what keeps a memory alive
     return hits;
   }
