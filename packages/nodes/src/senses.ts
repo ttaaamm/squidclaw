@@ -137,17 +137,20 @@ async function localWhisper(audioPath: string): Promise<string> {
     await run("ffmpeg", ["-y", "-i", audioPath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], { timeout: 60_000 });
 
     // The hot server first: model already in RAM, answers in a breath.
+    // ANY failure here — refused, wedged, timed out — falls through to the
+    // cold binary. Slower is acceptable; deaf is not.
     const url = process.env.SQUIDCLAW_WHISPER_URL;
     if (url) {
-      const form = new FormData();
-      form.append("file", new Blob([new Uint8Array(readFileSync(wav))]), "audio.wav");
-      form.append("response_format", "json");
-      const res = await fetch(`${url}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
-      if (res.ok) {
-        const text = ((await res.json()) as { text?: string }).text?.trim();
-        if (text) return text;
-      }
-      // fall through to the cold binary — slower, but never deaf
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([new Uint8Array(readFileSync(wav))]), "audio.wav");
+        form.append("response_format", "json");
+        const res = await fetch(`${url}/inference`, { method: "POST", body: form, signal: AbortSignal.timeout(90_000) });
+        if (res.ok) {
+          const text = ((await res.json()) as { text?: string }).text?.trim();
+          if (text) return text;
+        }
+      } catch { /* the cold path below still hears */ }
     }
 
     const bin = process.env.SQUIDCLAW_WHISPER_BIN!;
