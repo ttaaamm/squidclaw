@@ -57,6 +57,46 @@ describe("the tool bridge", () => {
       await bridge.close();
     }
   });
+
+  it("caps a huge tool result before it re-enters the deep mind's context — the journal still gets the whole thing", async () => {
+    const bigOutput = { json: { page: "x".repeat(20_000) } };
+    const bigTool = { ...echoTool, name: "web.read", run: async () => [bigOutput] };
+    const steps: BridgeStep[] = [];
+    const bridge = await startToolBridge({ tools: [bigTool], tenantId: "t", onStep: (s) => void steps.push(s) });
+    try {
+      const res = await fetch(`${bridge.url}/call`, {
+        method: "POST",
+        headers: { "x-bridge-token": bridge.token, "content-type": "application/json" },
+        body: JSON.stringify({ name: "web_read", args: {} }),
+      });
+      const body = (await res.json()) as { ok: boolean; result: Array<{ truncated?: boolean; note?: string }> };
+      expect(body.ok).toBe(true);
+      expect(JSON.stringify(body.result).length).toBeLessThan(4_000); // capped, not the full 20k
+      expect(body.result[0].truncated).toBe(true);
+      expect(body.result[0].note).toContain("trimmed");
+      // The journal — what the canvas and habits are built from — keeps the real data.
+      expect(steps[0].output[0].json.page).toHaveLength(20_000);
+    } finally {
+      await bridge.close();
+    }
+  });
+
+  it("caps a giant error message the same way", async () => {
+    const boom = { ...echoTool, name: "boom", run: async () => { throw new Error("x".repeat(10_000)); } };
+    const bridge = await startToolBridge({ tools: [boom], tenantId: "t", onStep: () => {} });
+    try {
+      const res = await fetch(`${bridge.url}/call`, {
+        method: "POST",
+        headers: { "x-bridge-token": bridge.token, "content-type": "application/json" },
+        body: JSON.stringify({ name: "boom", args: {} }),
+      });
+      const body = (await res.json()) as { error: string };
+      expect(body.error.length).toBeLessThan(3_100);
+      expect(body.error).toContain("[trimmed]");
+    } finally {
+      await bridge.close();
+    }
+  });
 });
 
 describe("the MCP shim, as a real process", () => {

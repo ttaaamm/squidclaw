@@ -61,10 +61,20 @@ const platform = new Platform({
           model: process.env.SQUIDCLAW_DEEP_MODEL ?? "sonnet",
         }
       : undefined,
+  // Channel docking's other half: an unsolicited push (a reflex firing, a
+  // commitment) goes wherever the human is actually standing right now —
+  // not "the first Telegram binding ever made". Falls back to the old
+  // behavior if nothing's been heard from this tenant yet.
   notify: (tenantId, message) => {
     console.log(`[${tenantId}] ${message}`);
-    const chat = platform.tenants.bindings(tenantId).find((b) => b.surface === "telegram");
-    if (chat) void surface.bot.api.sendMessage(chat.chatId, message).catch(() => {});
+    const active = platform.lastActive(tenantId);
+    const target = active ?? platform.tenants.bindings(tenantId).find((b) => b.surface === "telegram");
+    if (!target) return;
+    if (target.surface === "whatsapp" && whatsapp) {
+      void whatsapp.send(target.chatId, message).catch(() => {});
+    } else {
+      void surface.bot.api.sendMessage(target.chatId, message).catch(() => {});
+    }
   },
 });
 

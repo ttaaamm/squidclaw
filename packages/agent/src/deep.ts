@@ -37,6 +37,33 @@ export interface ToolBridge {
 /** MCP tool names allow [a-zA-Z0-9_-]; ours have dots. */
 export const toMcpName = (name: string) => name.replaceAll(".", "_");
 
+/**
+ * The deep mind's own context is out of our hands — Claude Code manages
+ * that transcript itself. What IS ours: what we hand it per tool call.
+ * The classic loop already caps a tool result at TOOL_RESULT_CHARS before
+ * it re-enters context; this bridge capped item COUNT (max 5) but never
+ * SIZE — a single huge read (a big file, a long SSH output) went through
+ * whole, every time, for the rest of a long multi-tool deep run. Same cap,
+ * same shape of fix, applied where the deep path actually needed it.
+ */
+export const BRIDGE_RESULT_CHARS = 3_000;
+
+function clippedResult(output: Item[]): unknown[] {
+  const items = output.slice(0, 5).map((i) => i.json);
+  const full = JSON.stringify(items);
+  if (full.length <= BRIDGE_RESULT_CHARS) return items;
+  return [{
+    truncated: true,
+    preview: full.slice(0, BRIDGE_RESULT_CHARS),
+    note: `output trimmed from ${full.length} to ${BRIDGE_RESULT_CHARS} chars — ask for specifics if needed`,
+  }];
+}
+
+function clippedError(err: unknown): string {
+  const text = String(err);
+  return text.length > BRIDGE_RESULT_CHARS ? `${text.slice(0, BRIDGE_RESULT_CHARS)}… [trimmed]` : text;
+}
+
 export function startToolBridge(opts: {
   tools: NodeDef[];
   tenantId: string;
@@ -102,13 +129,13 @@ export function startToolBridge(opts: {
                 });
                 return;
               }
-              send(200, { ok: true, result: output.slice(0, 5).map((i) => i.json) });
+              send(200, { ok: true, result: clippedResult(output) });
             } catch (err) {
               opts.onStep({
                 node: tool.name, params: args ?? {}, output: [], error: String(err),
                 startedAt, finishedAt: new Date().toISOString(),
               });
-              send(200, { ok: false, error: String(err) });
+              send(200, { ok: false, error: clippedError(err) });
             }
           } catch {
             send(400, { error: "body must be JSON {name, args}" });

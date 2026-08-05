@@ -226,6 +226,42 @@ export class Platform {
     return this.pool.workspaceFor(tenantId).dir;
   }
 
+  /**
+   * Channel docking: one conversation, wherever it's happening.
+   *
+   * Chat history, vibes, and any pending interview are keyed by DOCKED KEY
+   * (the tenant id) rather than the raw (surface, chatId) that carried the
+   * message in — so a tenant bound to both Telegram and WhatsApp shares one
+   * mind across both doors, not two strangers who happen to share a name.
+   * Flow SESSIONS stay keyed by the raw chat id on purpose: a flow's own
+   * telegram.send steps reply to a real numeric chat id, a delivery detail
+   * that has no meaning once generalized across surfaces.
+   *
+   * lastActive tracks where the human most recently spoke FROM, so
+   * unsolicited pushes (reflex firings, commitments) go to whichever door
+   * they're actually standing at, not "the first Telegram binding ever made."
+   */
+  private dockingPath(tenantId: string): string {
+    return join(this.tenantDir(tenantId), "docking.json");
+  }
+
+  private setLastActive(tenantId: string, surface: string, chatId: string): void {
+    mkdirSync(this.tenantDir(tenantId), { recursive: true });
+    writeFileSync(this.dockingPath(tenantId), JSON.stringify({ surface, chatId, at: new Date().toISOString() }), "utf8");
+  }
+
+  /** Where a tenant's replies should land right now — wherever they last spoke from. */
+  lastActive(tenantId: string): { surface: string; chatId: string } | undefined {
+    const path = this.dockingPath(tenantId);
+    if (!existsSync(path)) return undefined;
+    try {
+      const { surface, chatId } = JSON.parse(readFileSync(path, "utf8")) as { surface: string; chatId: string };
+      return { surface, chatId };
+    } catch {
+      return undefined;
+    }
+  }
+
   private hatched(tenantId: string): boolean {
     return existsSync(join(this.tenantDir(tenantId), ".hatched"));
   }
@@ -502,7 +538,12 @@ if (sub === "scopes") {
     progress?: (note: string) => void,
   ): Promise<string> {
     const trimmed = text.trim();
-    const lane = `${surface}:${chatId}`;
+    // A bound tenant's lane is the tenant itself — so Telegram and WhatsApp
+    // messages for the SAME human genuinely serialize together (one
+    // conversation, not two racing ones) instead of just per-surface.
+    // Pre-join messages (no tenant yet) fall back to the raw address.
+    const tenant = this.tenants.tenantFor(surface, chatId);
+    const lane = tenant?.id ?? `${surface}:${chatId}`;
     const busy = this.laneTail.has(lane);
 
     if (busy && (trimmed === "/cancel" || trimmed.startsWith("/flow"))) {
@@ -510,10 +551,9 @@ if (sub === "scopes") {
     }
 
     if (busy && !trimmed.startsWith("/")) {
-      const tenant = this.tenants.tenantFor(surface, chatId);
       if (tenant) {
         const organism = this.pool.peek(tenant.id);
-        if (organism?.agent.acceptSteer(chatId, text)) return ""; // absorbed into the active turn
+        if (organism?.agent.acceptSteer(tenant.id, text)) return ""; // absorbed into the active turn, from any door
       }
     }
 
@@ -573,6 +613,7 @@ if (sub === "scopes") {
       const tenant = this.tenants.byToken(token);
       if (!tenant) return "That invite doesn't match any account — check it with whoever sent it.";
       this.tenants.bind(surface, chatId, tenant.id);
+      this.setLastActive(tenant.id, surface, chatId); // joining from a door is speaking from it
       // A new agent doesn't say welcome — it asks who it is. The birth ritual.
       if (!this.hatched(tenant.id)) {
         return `Welcome — this chat now belongs to **${tenant.name}**.\n\n${this.hatchStep(tenant.id, "")}`;
@@ -588,6 +629,11 @@ if (sub === "scopes") {
         : "Hi — I'm SquidClaw, an agent that learns your routine work until it runs itself.\nThis chat isn't connected yet: if you have an invite, say /join <token>.";
     }
     if (!tenant.enabled) return "This account is currently disabled.";
+    this.setLastActive(tenant.id, surface, chatId);
+    // The docked key: conversation history, vibes, and any pending
+    // interview follow the TENANT, not the raw (surface, chatId) — one
+    // mind across every door it's bound to.
+    const dockedKey = tenant.id;
 
     // Mid-ritual messages continue the ritual — nothing else happens until it's born.
     if (!this.hatched(tenant.id)) return this.hatchStep(tenant.id, text);
@@ -626,17 +672,19 @@ if (sub === "scopes") {
       return this.runFlowSession(tenant.id, chatId, activeFlow, text);
     }
 
-    // An interview in progress: the next messages are answers, not prompts.
-    const pendingAsk = this.elicitations(tenant.id)[chatId];
+    // An interview in progress: the next messages are answers, not prompts —
+    // docked, so answering from a different door than the one that was
+    // asked still completes it.
+    const pendingAsk = this.elicitations(tenant.id)[dockedKey];
     if (pendingAsk) {
       if (trimmed === "/cancel") {
-        this.setElicitation(tenant.id, chatId, null);
+        this.setElicitation(tenant.id, dockedKey, null);
         return "Cancelled — ask me again anytime.";
       }
       if (!trimmed.startsWith("/")) {
-        return this.continueElicitation(tenant.id, chatId, pendingAsk, text, progress);
+        return this.continueElicitation(tenant.id, dockedKey, pendingAsk, text, progress);
       }
-      this.setElicitation(tenant.id, chatId, null); // a command means they moved on
+      this.setElicitation(tenant.id, dockedKey, null); // a command means they moved on
     }
 
     // The window into its own mind — a one-time link, minted for this tenant only.
@@ -652,14 +700,14 @@ if (sub === "scopes") {
       }
     }
 
-    const command = handleCommand(text, organism, chatId);
+    const command = handleCommand(text, organism, dockedKey);
     if (command !== null) return command;
 
     const denied = this.tenants.checkQuota(tenant.id, "thought");
     if (denied) return `⏳ ${denied}`;
 
     let elicit: ElicitRequest | undefined;
-    const reply = await organism.agent.handleMessage(text, chatId, progress, {
+    const reply = await organism.agent.handleMessage(text, dockedKey, progress, {
       surface,
       onElicit: (request) => (elicit = request),
     });
@@ -669,7 +717,7 @@ if (sub === "scopes") {
     // interview from here. The canonical question replaces whatever the
     // model said — deterministic wording, deterministic follow-through.
     if (elicit) {
-      this.setElicitation(tenant.id, chatId, elicit);
+      this.setElicitation(tenant.id, dockedKey, elicit);
       return `${this.askOf(elicit)}\n(/cancel if you change your mind)`;
     }
 

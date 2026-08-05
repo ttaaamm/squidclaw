@@ -121,6 +121,12 @@ export class WhatsAppSurface implements ChatSurface {
     this.onEvent = opts.onEvent ?? ((e) => console.log(`[whatsapp] ${e}`));
   }
 
+  /** Unsolicited pushes — reflex firings, commitments, channel docking. */
+  async send(chatId: string, text: string): Promise<void> {
+    if (!this.socket) throw new Error("whatsapp: not connected yet");
+    await this.socket.sendText(chatId, text);
+  }
+
   async start(): Promise<void> {
     const socket = await this.connect(this.authDir);
     this.socket = socket;
