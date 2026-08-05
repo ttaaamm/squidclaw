@@ -51,6 +51,13 @@ export interface AgentOptions {
   policies?: ToolPolicy[];
   /** In-run transcript budget (chars); older tool rounds fold when exceeded. */
   runBudgetChars?: number;
+  /**
+   * The fast lane: one quick cheap-model breath before the deep machinery.
+   * Casual messages get answered in seconds; anything needing tools or real
+   * work self-escalates. Default on whenever the deep mind is configured
+   * (that's where the latency lives).
+   */
+  fastLane?: boolean;
 }
 
 /** Context passed along with a run. */
@@ -343,6 +350,14 @@ export class Agent {
     onProgress?: (note: string) => void,
     meta?: RunMeta,
   ): Promise<string> {
+    // The fast lane: don't pay deep-thinking prices for shallow messages.
+    // Default on when the deep mind is configured (that is where latency
+    // lives); explicitly settable either way.
+    if (this.opts.fastLane ?? !!this.opts.deep) {
+      const quick = await this.fastLane(text, chatId, meta);
+      if (quick !== undefined) return quick;
+    }
+
     if (this.opts.deep) {
       try {
         return await this.deepRun(text, chatId, onProgress, meta);
@@ -352,6 +367,43 @@ export class Agent {
       }
     }
     return this.classicRun(text, chatId, onProgress, meta);
+  }
+
+  /**
+   * One cheap breath: the fast model either answers well right now, or
+   * says <ESCALATE> and the deep machinery takes over. No classifier bot,
+   * no keyword rules — the model that would have answered decides. The
+   * fast lane must never break anything: any failure means escalation.
+   */
+  private async fastLane(text: string, chatId: string, meta?: RunMeta): Promise<string | undefined> {
+    const { brains, conversation, tenantId } = this.opts;
+    try {
+      const history = (conversation?.recent(tenantId, chatId) ?? []).map((t) => ({
+        role: t.role,
+        content: t.content,
+      }));
+      const res = await brains.complete({
+        tier: "cheap",
+        system:
+          this.systemPrompt(chatId, meta?.surface, text) +
+          "\n\n## Fast lane\nYou are the FAST LANE — answer instantly, WITHOUT any tools. " +
+          "If this message needs a tool, a flow, a file, the web, publishing, remembering something new, " +
+          "or any multi-step work — or you are not fully confident — reply with EXACTLY <ESCALATE> and nothing else. " +
+          "Greetings, casual conversation, questions answerable from what you already see here: answer directly, short and warm.",
+        messages: [...history, { role: "user", content: text }],
+        maxTokens: 600,
+      });
+      const reply = cleanReply(res.text);
+      if (!reply || reply.includes("ESCALATE") || res.toolCalls.length) return undefined;
+
+      conversation?.append(tenantId, chatId, "user", text);
+      conversation?.append(tenantId, chatId, "assistant", reply);
+      this.extractFacts(text, reply);
+      this.updateSummary(chatId);
+      return reply;
+    } catch {
+      return undefined; // a stumble on the fast lane just means the deep lane runs
+    }
   }
 
   /**

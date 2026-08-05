@@ -126,6 +126,9 @@ export class Platform {
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
       deep: this.opts.deep,
+      // Shallow messages answer in seconds; real work still thinks deep.
+      // Only worth the triage detour when the slow lane exists.
+      fastLane: this.opts.deep ? process.env.SQUIDCLAW_FAST !== "0" : false,
       // Operator scopes: guarded organs (shell, ssh, email, publish) refuse
       // unless this tenant holds the named grant. Founding tenants hold "*".
       policies: [...DEFAULT_POLICIES, scopePolicy(tenant.scopes)],
