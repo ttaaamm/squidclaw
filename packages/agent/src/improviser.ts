@@ -69,6 +69,15 @@ export interface RunMeta {
    * a guarantee of the system, not a behavior we hope the model remembers.
    */
   onElicit?: (request: ElicitRequest) => void;
+  /**
+   * Fired with each fragment of a reply as it is written, for surfaces that
+   * can show text appearing rather than a spinner.
+   *
+   * Only the fast lane streams. The deep and classic lanes work through tools
+   * before they have anything to say, so there is nothing to show until they
+   * are done — and their intermediate chatter is what `onProgress` is for.
+   */
+  onDelta?: (chunk: string) => void;
 }
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
@@ -500,6 +509,7 @@ export class Agent {
           "Match the message's register: a greeting gets a greeting back — one line, no plans, no work talk, no status reports.",
         messages: [...history, { role: "user", content: text }],
         maxTokens: 600,
+        onDelta: meta?.onDelta,
       });
       const tComplete = Date.now();
       if (timing) {

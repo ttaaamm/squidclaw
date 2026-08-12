@@ -38,6 +38,42 @@ describe("the fast lane", () => {
     expect(tiers).toEqual(["haiku"]); // one breath, nothing else
   });
 
+  it("streams the reply out as it is written, and still returns it whole", async () => {
+    const seen: string[] = [];
+    // A mind that writes in pieces, the way the CLI actually emits stdout.
+    const mind = {
+      complete: async (req: { onDelta?: (c: string) => void }) => {
+        for (const part of ["أهلاً", " تامر", "! 🐙"]) req.onDelta?.(part);
+        return { text: "أهلاً تامر! 🐙", toolCalls: [], assistantContent: [] };
+      },
+    };
+    const agent = new Agent({
+      brains: mind as never,
+      journal: new Journal(":memory:"),
+      tenantId: "t",
+      innerMe: "me",
+      fastLane: true,
+    });
+
+    const reply = await agent.handleMessage("هلا", "default", undefined, {
+      onDelta: (c) => seen.push(c),
+    });
+
+    expect(seen).toEqual(["أهلاً", " تامر", "! 🐙"]);
+    // A surface that cannot stream still gets exactly one complete answer.
+    expect(reply).toBe("أهلاً تامر! 🐙");
+    expect(seen.join("")).toBe(reply);
+  });
+
+  it("a surface passing no onDelta is entirely unaffected", async () => {
+    const { mind, tiers } = mindRecordingTiers({ haiku: "fine, thanks" });
+    const agent = new Agent({ brains: mind, journal: new Journal(":memory:"), tenantId: "t", innerMe: "me", fastLane: true });
+
+    // Telegram's exact call shape — no meta at all.
+    expect(await agent.handleMessage("how are you?")).toBe("fine, thanks");
+    expect(tiers).toEqual(["haiku"]);
+  });
+
   it("escalates real work: the fast model says so, the strong loop delivers", async () => {
     const { mind, tiers } = mindRecordingTiers({ haiku: "<ESCALATE>", sonnet: "the report is written" });
     const agent = new Agent({ brains: mind, journal: new Journal(":memory:"), tenantId: "t", innerMe: "me", fastLane: true });

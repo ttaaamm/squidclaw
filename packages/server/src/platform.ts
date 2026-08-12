@@ -550,6 +550,12 @@ if (sub === "scopes") {
     chatId: string,
     text: string,
     progress?: (note: string) => void,
+    /**
+     * For surfaces that can render a reply as it is written. Optional and
+     * ignored by every lane but the fast one — Telegram passes nothing and
+     * behaves exactly as before.
+     */
+    onDelta?: (chunk: string) => void,
   ): Promise<string> {
     const trimmed = text.trim();
     // A bound tenant's lane is the tenant itself — so Telegram and WhatsApp
@@ -561,7 +567,7 @@ if (sub === "scopes") {
     const busy = this.laneTail.has(lane);
 
     if (busy && (trimmed === "/cancel" || trimmed.startsWith("/flow"))) {
-      return this.handleTurn(surface, chatId, text, progress);
+      return this.handleTurn(surface, chatId, text, progress, onDelta);
     }
 
     if (busy && !trimmed.startsWith("/")) {
@@ -574,7 +580,7 @@ if (sub === "scopes") {
     const tail = this.laneTail.get(lane) ?? Promise.resolve("");
     const run = tail
       .catch(() => "")
-      .then(() => this.handleTurn(surface, chatId, text, progress));
+      .then(() => this.handleTurn(surface, chatId, text, progress, onDelta));
     this.laneTail.set(lane, run);
     try {
       return await run;
@@ -588,6 +594,7 @@ if (sub === "scopes") {
     chatId: string,
     text: string,
     progress?: (note: string) => void,
+    onDelta?: (chunk: string) => void,
   ): Promise<string> {
     const trimmed = text.trim();
     const admin = this.isAdmin(surface, chatId);
@@ -724,6 +731,7 @@ if (sub === "scopes") {
     const reply = await organism.agent.handleMessage(text, dockedKey, progress, {
       surface,
       onElicit: (request) => (elicit = request),
+      onDelta,
     });
     this.tenants.record(tenant.id, "thought");
 
