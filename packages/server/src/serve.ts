@@ -158,9 +158,14 @@ const dashboard = new DashboardServer(
     // (surface, chatId), and the tenant's own id is a stable web chatId.
     chat: async (tenantId, text, page) => {
       if (!tenantId) throw new Error("the admin master view has no tenant to talk to — sign in with /canvas");
+      const t0 = Date.now();
       platform.tenants.bind("web", tenantId, tenantId);
       const withPage = page && page !== "/" ? `${text}\n\n[the human is looking at ${page} in the canvas]` : text;
-      return platform.handle("web", tenantId, withPage);
+      const reply = await platform.handle("web", tenantId, withPage);
+      if (process.env.SQUIDCLAW_TIMING === "1") {
+        console.log(`[timing] chat handle=${Date.now() - t0}ms tenant=${tenantId}`);
+      }
+      return reply;
     },
     run: async (tenantId, name, args) => {
       if (!tenantId) throw new Error("the admin master view has no tenant to run as — sign in with /canvas");

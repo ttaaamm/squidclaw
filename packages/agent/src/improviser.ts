@@ -458,15 +458,22 @@ export class Agent {
 
   private async fastLane(text: string, chatId: string, meta?: RunMeta): Promise<string | undefined> {
     const { brains, conversation, tenantId } = this.opts;
+    // Timing, off unless asked for: a slow turn is invisible from outside —
+    // you cannot tell prompt-building from thinking without splitting them.
+    const timing = process.env.SQUIDCLAW_TIMING === "1";
+    const t0 = Date.now();
     try {
       const history = (conversation?.recent(tenantId, chatId) ?? []).map((t) => ({
         role: t.role,
         content: t.content,
       }));
+      const tHistory = Date.now();
+      const system = await this.systemPrompt(chatId, meta?.surface, text);
+      const tPrompt = Date.now();
       const res = await brains.complete({
         tier: "cheap",
         system:
-          await this.systemPrompt(chatId, meta?.surface, text) +
+          system +
           "\n\n## Fast lane\nYou are the FAST LANE — answer instantly, WITHOUT any tools. " +
           "If this message needs a tool, a flow, a file, the web, publishing, remembering something new, " +
           "or any multi-step work — or you are not fully confident — reply with EXACTLY <ESCALATE> and nothing else. " +
@@ -476,6 +483,13 @@ export class Agent {
         messages: [...history, { role: "user", content: text }],
         maxTokens: 600,
       });
+      const tComplete = Date.now();
+      if (timing) {
+        console.log(
+          `[timing] fastLane history=${tHistory - t0}ms systemPrompt=${tPrompt - tHistory}ms ` +
+            `complete=${tComplete - tPrompt}ms systemBytes=${system.length} total=${tComplete - t0}ms`,
+        );
+      }
       const reply = cleanReply(res.text);
       if (!reply || reply.includes("ESCALATE") || res.toolCalls.length) return undefined;
 
