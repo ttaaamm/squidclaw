@@ -120,6 +120,44 @@ describe("writing flows through the canvas", () => {
     expect((await call("/api/habits/doomed", { method: "DELETE" })).status).toBe(404);
   });
 
+  it("refreshes the agent after every write, so a promoted flow is runnable at once", async () => {
+    // Regression: habits are registered into a Map when an organism boots, so
+    // without a refresh a flow promoted here stayed unrunnable until restart.
+    const seen: Array<string | undefined> = [];
+    const dir = mkdtempSync(join(tmpdir(), "refresh-"));
+    const store = new FlowStore(join(dir, "flows"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: store,
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      { token: TOKEN, pollMs: 10_000, run: async () => ({}), refresh: (t) => void seen.push(t) },
+    );
+    const p = await s.listen(0);
+    const hit = (path: string, init: RequestInit = {}) =>
+      fetch(`http://127.0.0.1:${p}${path}`, {
+        ...init,
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json", ...(init.headers ?? {}) },
+      });
+    try {
+      await hit("/api/habits", { method: "POST", body: JSON.stringify(flowBody("fresh")) });
+      expect(seen).toHaveLength(1); // create
+
+      await hit("/api/habits/fresh", { method: "PATCH", body: JSON.stringify({ description: "x" }) });
+      expect(seen).toHaveLength(2); // edit
+
+      const promoted = await hit("/api/habits/fresh/promote", { method: "POST" });
+      expect(promoted.status).toBe(200);
+      expect(seen).toHaveLength(3); // promote -- and before the response, not after
+
+      await hit("/api/habits/fresh", { method: "DELETE" });
+      expect(seen).toHaveLength(4); // delete
+    } finally {
+      await s.close();
+    }
+  });
+
   it("runs a flow through the injected runner, passing the arguments along", async () => {
     await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("runnable")) });
     const res = await call("/api/habits/runnable/run", {

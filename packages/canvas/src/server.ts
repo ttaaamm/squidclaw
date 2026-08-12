@@ -32,6 +32,15 @@ export interface DashboardOptions {
    * that. Absent (single-user dev, tests) the run endpoint answers 501.
    */
   run?(tenantId: string | undefined, name: string, args: Record<string, unknown>): Promise<unknown>;
+  /**
+   * Called after any write, so a warm agent notices flows that changed under
+   * it. Habits are registered into a Map when an organism boots
+   * (improviser.registerHabits), so without this a flow promoted through the
+   * canvas stays invisible to the agent — and unrunnable — until restart. The
+   * chat `/promote` command already does this; this is the same courtesy for
+   * the HTTP door.
+   */
+  refresh?(tenantId: string | undefined): Promise<void> | void;
 }
 
 /**
@@ -163,6 +172,7 @@ export class DashboardServer {
           return this.send(res, 409, { error: `a habit named "${flow.name}" already exists` });
         }
         src.flows.save(flow, "draft");
+        await this.opts.refresh?.(resolved.tenantId);
         this.send(res, 201, { ok: true, name: flow.name, status: "draft" });
       });
     }
@@ -174,6 +184,7 @@ export class DashboardServer {
 
       if (req.method === "DELETE") {
         const gone = src.flows.remove(name);
+        if (gone) void this.opts.refresh?.(resolved.tenantId);
         return this.send(res, gone ? 200 : 404, gone ? { ok: true, name } : { error: "no such habit" });
       }
 
@@ -185,6 +196,7 @@ export class DashboardServer {
           const merged = this.asFlow({ ...flow, ...body, name: flow.name });
           if (typeof merged === "string") return this.send(res, 400, { error: merged });
           src.flows.save(merged, flow.status);
+          await this.opts.refresh?.(resolved.tenantId);
           this.send(res, 200, { ok: true, name: flow.name, status: flow.status });
         });
       }
@@ -207,13 +219,20 @@ export class DashboardServer {
 
       if (action[2] === "promote") {
         const armed = src.flows.promote(name);
-        return this.send(res, armed ? 200 : 409,
-          armed ? { ok: true, name, status: "promoted" } : { error: "no draft to promote" });
+        if (!armed) return this.send(res, 409, { error: "no draft to promote" });
+        // Refresh before answering, not after: the caller's very next move is
+        // usually to run this flow, and a stale agent would refuse it.
+        return void Promise.resolve(this.opts.refresh?.(resolved.tenantId))
+          .then(() => this.send(res, 200, { ok: true, name, status: "promoted" }))
+          .catch((err) => this.send(res, 500, { error: String(err) }));
       }
 
       if (!this.opts.run) return this.send(res, 501, { error: "this server cannot run habits" });
       return void this.write(req, res, async (body) => {
         try {
+          // Cheap belt-and-braces: a flow promoted by some other door (chat,
+          // another tab) should still be runnable here without a restart.
+          await this.opts.refresh?.(resolved.tenantId);
           const result = await this.opts.run!(resolved.tenantId, name, body as Record<string, unknown>);
           this.send(res, 200, { ok: true, name, result });
         } catch (err) {

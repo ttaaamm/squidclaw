@@ -144,6 +144,14 @@ const dashboard = new DashboardServer(
     // Running a habit from the canvas takes the same road as a webhook firing:
     // one runner, one quota, one journal — so a flow behaves identically
     // whether a human pressed the button or a reflex fired it.
+    // A warm organism registers its habits once, at boot. Without this, a flow
+    // promoted through the canvas stays invisible to the agent until restart —
+    // so creating a flow and running it, the whole point of the UI, would fail.
+    refresh: async (tenantId) => {
+      if (!tenantId) return;
+      const organism = await platform.organismFor(tenantId);
+      organism.agent.registerHabits();
+    },
     run: async (tenantId, name, args) => {
       if (!tenantId) throw new Error("the admin master view has no tenant to run as — sign in with /canvas");
       const denied = platform.tenants.checkQuota(tenantId, "habit");
