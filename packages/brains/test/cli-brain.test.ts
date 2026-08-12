@@ -1,5 +1,45 @@
 import { describe, it, expect } from "vitest";
-import { CliBrain, parseDecision, sanitizeExecError } from "@squidclaw/brains";
+import { CliBrain, parseDecision, sanitizeExecError, textDelta } from "@squidclaw/brains";
+
+// Verbatim lines from `claude -p --output-format stream-json
+// --include-partial-messages`, so the parser is tested against what the CLI
+// really emits rather than what we imagine it emits.
+describe("reading the CLI's stream-json events", () => {
+  it("takes the reply's text and nothing else", () => {
+    expect(
+      textDelta('{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"one\\ntwo"}},"session_id":"x"}'),
+    ).toBe("one\ntwo");
+  });
+
+  it("never leaks the model's private reasoning", () => {
+    // thinking_delta arrives on the same stream, before the answer. Forwarding
+    // it would put the model's scratchpad in front of the human.
+    expect(
+      textDelta('{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking me"}},"session_id":"x"}'),
+    ).toBeUndefined();
+  });
+
+  it("ignores the rest of the noise on the stream", () => {
+    for (const line of [
+      '{"type":"system","subtype":"init","cwd":"/root","tools":["Bash"]}',
+      '{"type":"system","subtype":"thinking_tokens","estimated_tokens":6}',
+      '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[]}}',
+      '{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}}',
+      '{"type":"stream_event","event":{"type":"message_stop"}}',
+      '{"type":"result","subtype":"success","duration_ms":1689}',
+      '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"signature_delta","signature":"EqsD"}}}',
+    ]) {
+      expect(textDelta(line), line.slice(0, 60)).toBeUndefined();
+    }
+  });
+
+  it("shrugs off a truncated or empty line instead of losing the reply", () => {
+    expect(textDelta('{"type":"stream_event","event":{"delta":{"type":"text_d')).toBeUndefined();
+    expect(textDelta("")).toBeUndefined();
+    expect(textDelta("not json at all")).toBeUndefined();
+  });
+});
 
 describe("cli brain (thinks on the human's subscription)", () => {
   // The decision envelope only exists when there is a decision to make — that

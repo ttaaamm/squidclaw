@@ -43,6 +43,31 @@ const DECISION_SCHEMA = {
   },
 } as const;
 
+/**
+ * The reply's own text out of one `--output-format stream-json` line, or
+ * undefined for every other event.
+ *
+ * The stream carries far more than the answer: init banners, rate-limit
+ * notices, token counts, and `thinking_delta` — the model's private reasoning.
+ * Only `text_delta` is the reply, and forwarding anything else would put the
+ * model's scratchpad in front of the human.
+ */
+export function textDelta(line: string): string | undefined {
+  try {
+    const ev = JSON.parse(line) as {
+      type?: string;
+      event?: { delta?: { type?: string; text?: string } };
+    };
+    const delta = ev.event?.delta;
+    if (ev.type === "stream_event" && delta?.type === "text_delta" && typeof delta.text === "string") {
+      return delta.text;
+    }
+  } catch {
+    /* one malformed line is not worth losing the reply over */
+  }
+  return undefined;
+}
+
 function renderTools(tools: ToolSpec[]): string {
   return [
     "You have these tools:",
@@ -118,8 +143,18 @@ export class CliBrain implements Mind {
       opts.execStream ??
       ((args, timeoutMs, onDelta) =>
         new Promise<string>((resolve, reject) => {
-          const child = spawn("claude", args);
+          // Plain `-p` buffers the whole reply and prints it at the end, so
+          // nothing above can stream however it is plumbed. stream-json is the
+          // only mode that emits as it goes; --include-partial-messages is what
+          // makes the deltas partial rather than one block per message.
+          const child = spawn("claude", [
+            ...args,
+            "--output-format", "stream-json",
+            "--include-partial-messages",
+            "--verbose",
+          ]);
           let out = "";
+          let line = "";
           let err = "";
           let settled = false;
           const finish = (fn: () => void) => {
@@ -133,10 +168,19 @@ export class CliBrain implements Mind {
             finish(() => reject(new Error(`claude CLI timed out after ${timeoutMs}ms`)));
           }, timeoutMs);
 
+          // Newline-delimited JSON events. Only the reply's own text is
+          // forwarded: the stream also carries thinking_delta, which is the
+          // model's private reasoning and must never reach the human.
           child.stdout.on("data", (b: Buffer) => {
-            const chunk = b.toString();
-            out += chunk;
-            onDelta(chunk);
+            line += b.toString();
+            const lines = line.split("\n");
+            line = lines.pop() ?? "";
+            for (const raw of lines) {
+              const text = textDelta(raw);
+              if (text === undefined) continue;
+              out += text;
+              onDelta(text);
+            }
           });
           child.stderr.on("data", (b: Buffer) => (err += b.toString()));
           child.on("error", (e) => finish(() => reject(sanitizeExecError(e))));
