@@ -21,6 +21,13 @@ export interface AgentOptions {
   journal: Journal;
   tenantId: string;
   innerMe: string;
+  /**
+   * The doors this human can be reached through — Telegram chat ids and the
+   * like. The platform has always known these; the agent never did, so asked
+   * to "send me that on Telegram" it had to ask for a chat id it was already
+   * bound to. Read fresh each turn, since a door can be added mid-conversation.
+   */
+  doors?: () => Array<{ surface: string; chatId: string }>;
   conversation?: ConversationStore;
   memory?: SemanticMemory;
   vibes?: VibeState;
@@ -389,6 +396,19 @@ export class Agent {
     );
 
     if (this.opts.vibes) parts.push(this.opts.vibes.prompt(chatId));
+
+    // Knowing where the human is reachable is cheap, static, and the
+    // difference between doing what was asked and asking for something the
+    // system already knows. Included in the lean prompt too — it costs one
+    // line and no I/O.
+    const doors = this.opts.doors?.() ?? [];
+    if (doors.length) {
+      parts.push(
+        `## Where I can reach this human\n${doors
+          .map((d) => `- ${d.surface}: chatId ${d.chatId}`)
+          .join("\n")}\nUse these ids directly — never ask for one that is listed here.`,
+      );
+    }
 
     // What this chat was about before the recent window — compressed, not lost.
     const summary = this.opts.conversation?.summary(this.opts.tenantId, chatId);

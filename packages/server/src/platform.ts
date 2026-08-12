@@ -135,6 +135,10 @@ export class Platform {
       flows,
       tenantId: tenant.id,
       innerMe: readFileSync(innerMePath, "utf8"),
+      // The platform has always known which chats reach this human; now the
+      // agent does too, so "send me that on Telegram" no longer asks for an
+      // id it is already bound to.
+      doors: () => this.tenants.bindings(tenant.id).map((b) => ({ surface: b.surface, chatId: b.chatId })),
       deep: this.opts.deep,
       // Shallow messages answer in seconds; real work still thinks deep.
       // Only worth the triage detour when the slow lane exists.

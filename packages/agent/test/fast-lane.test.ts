@@ -38,6 +38,51 @@ describe("the fast lane", () => {
     expect(tiers).toEqual(["haiku"]); // one breath, nothing else
   });
 
+  it("knows which chats reach its human, so it never asks for an id it is bound to", async () => {
+    let system = "";
+    const mind = {
+      complete: async (req: { system?: string }) => {
+        system = req.system ?? "";
+        return { text: "sent", toolCalls: [], assistantContent: [] };
+      },
+    };
+    const agent = new Agent({
+      brains: mind as never,
+      journal: new Journal(":memory:"),
+      tenantId: "t",
+      innerMe: "me",
+      fastLane: true,
+      doors: () => [
+        { surface: "telegram", chatId: "8123517797" },
+        { surface: "web", chatId: "65ed2cc7" },
+      ],
+    });
+
+    await agent.handleMessage("send me hi on telegram");
+    expect(system).toContain("8123517797");
+    expect(system).toContain("telegram");
+    expect(system).toMatch(/never ask for one that is listed/i);
+  });
+
+  it("says nothing about doors when there are none", async () => {
+    let system = "";
+    const mind = {
+      complete: async (req: { system?: string }) => {
+        system = req.system ?? "";
+        return { text: "hi", toolCalls: [], assistantContent: [] };
+      },
+    };
+    const agent = new Agent({
+      brains: mind as never,
+      journal: new Journal(":memory:"),
+      tenantId: "t",
+      innerMe: "me",
+      fastLane: true,
+    });
+    await agent.handleMessage("hello");
+    expect(system).not.toContain("Where I can reach");
+  });
+
   it("streams the reply out as it is written, and still returns it whole", async () => {
     const seen: string[] = [];
     // A mind that writes in pieces, the way the CLI actually emits stdout.
