@@ -224,6 +224,32 @@ export class DashboardServer {
       });
     }
 
+    // Arm or disarm, as a toggle. Deliberately separate from PATCH on the flow
+    // itself: changing what a habit *does* and changing whether it is live are
+    // different decisions, and only this one is the human's yes.
+    const status = path.match(/^\/api\/habits\/([\w.-]+)\/status$/);
+    if (status) {
+      const name = decodeURIComponent(status[1]);
+      if (req.method !== "PATCH") return this.send(res, 405, { error: "use PATCH" });
+      const flow = src.flows.find(name);
+      if (!flow) return this.send(res, 404, { error: "no such habit" });
+
+      return void this.write(req, res, async (body) => {
+        const want = String(body.status ?? "");
+        if (want !== "promoted" && want !== "draft") {
+          return this.send(res, 400, { error: 'status must be "promoted" or "draft"' });
+        }
+        if (want === flow.status) return this.send(res, 200, { ok: true, name, status: want });
+
+        const changed = want === "promoted" ? src.flows.promote(name) : src.flows.demote(name);
+        if (!changed) return this.send(res, 409, { error: `could not set "${name}" to ${want}` });
+        // Refresh before answering: arming should make it runnable at once,
+        // and disarming should stop the agent offering it.
+        await this.opts.refresh?.(resolved.tenantId);
+        this.send(res, 200, { ok: true, name, status: want });
+      });
+    }
+
     const action = path.match(/^\/api\/habits\/([\w.-]+)\/(run|promote)$/);
     if (action) {
       const name = decodeURIComponent(action[1]);

@@ -234,6 +234,30 @@ export class FlowStore {
     return removed;
   }
 
+  /**
+   * The human taking their yes back. The flow returns to being a draft:
+   * still there, still editable, but no longer armed or offered to the mind.
+   *
+   * Symmetric with `promote` on purpose — a switch you cannot flip back is a
+   * trapdoor, and the canvas shows this as a toggle.
+   */
+  demote(name: string): boolean {
+    const from = join(this.dir, `${name}.flow.json`);
+    if (!existsSync(from)) return false;
+    const flow = JSON.parse(readFileSync(from, "utf8")) as Flow;
+    writeFileSync(
+      join(this.draftsDir, `${name}.flow.json`),
+      `${JSON.stringify({ ...flow, status: "draft" }, null, 2)}\n`,
+      "utf8",
+    );
+    unlinkSync(from);
+    // promote() leaves this tombstone behind; clear it so a later promote
+    // finds a clean slate rather than refusing.
+    const spent = join(this.draftsDir, `${name}.flow.json.promoted`);
+    if (existsSync(spent)) unlinkSync(spent);
+    return true;
+  }
+
   /** The human's yes. Only promoted habits are ever offered as tools. */
   promote(name: string): boolean {
     const from = join(this.draftsDir, `${name}.flow.json`);

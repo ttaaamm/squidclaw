@@ -113,6 +113,38 @@ describe("writing flows through the canvas", () => {
     expect(after.status).toBe("promoted");
   });
 
+  it("arms and disarms a flow through the status toggle", async () => {
+    await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("toggle-me")) });
+    expect(flows.find("toggle-me")!.status).toBe("draft");
+
+    const on = await call("/api/habits/toggle-me/status", { method: "PATCH", body: JSON.stringify({ status: "promoted" }) });
+    expect(on.status).toBe(200);
+    expect(flows.find("toggle-me")!.status).toBe("promoted");
+
+    // A switch you cannot flip back is a trapdoor.
+    const off = await call("/api/habits/toggle-me/status", { method: "PATCH", body: JSON.stringify({ status: "draft" }) });
+    expect(off.status).toBe(200);
+    expect(flows.find("toggle-me")!.status).toBe("draft");
+
+    // And it can be armed again afterwards — the spent tombstone is cleared.
+    expect((await call("/api/habits/toggle-me/status", { method: "PATCH", body: JSON.stringify({ status: "promoted" }) })).status).toBe(200);
+    expect(flows.find("toggle-me")!.status).toBe("promoted");
+  });
+
+  it("refuses a nonsense status, and 404s an unknown flow", async () => {
+    await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("real")) });
+    expect((await call("/api/habits/real/status", { method: "PATCH", body: JSON.stringify({ status: "live" }) })).status).toBe(400);
+    expect((await call("/api/habits/ghost/status", { method: "PATCH", body: JSON.stringify({ status: "draft" }) })).status).toBe(404);
+    expect((await call("/api/habits/real/status", { method: "POST", body: "{}" })).status).toBe(405);
+  });
+
+  it("setting the status it already has is a no-op, not an error", async () => {
+    await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("idem")) });
+    const res = await call("/api/habits/idem/status", { method: "PATCH", body: JSON.stringify({ status: "draft" }) });
+    expect(res.status).toBe(200);
+    expect(flows.find("idem")!.status).toBe("draft");
+  });
+
   it("deletes a flow, and says so honestly when there was nothing to delete", async () => {
     await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("doomed")) });
     expect((await call("/api/habits/doomed", { method: "DELETE" })).status).toBe(200);
