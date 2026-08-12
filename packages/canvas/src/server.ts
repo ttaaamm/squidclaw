@@ -133,7 +133,15 @@ export class DashboardServer {
       return void res.end();
     }
 
+    // Session lookup builds (or reuses) a tenant's stores. Timed because a
+    // chat turn measured 4.5s outside handle(), and this is the only work
+    // between the socket and the agent.
+    const tResolve = Date.now();
     const resolved = this.resolveSources(req, url);
+    if (process.env.SQUIDCLAW_TIMING === "1" && path.startsWith("/api/")) {
+      const ms = Date.now() - tResolve;
+      if (ms > 50) console.log(`[timing] resolveSources=${ms}ms path=${path}`);
+    }
     if (!resolved) {
       res.writeHead(401, { "content-type": "text/plain; charset=utf-8" });
       return void res.end(
@@ -251,14 +259,24 @@ export class DashboardServer {
     if (path === "/api/chat") {
       if (req.method !== "POST") return this.send(res, 405, { error: "use POST" });
       if (!this.opts.chat) return this.send(res, 501, { error: "this server has no agent attached" });
+      const tChat = Date.now();
       return void this.write(req, res, async (body) => {
+        const tBody = Date.now();
         const text = String(body.text ?? "").trim();
         if (!text) return this.send(res, 400, { error: "say something" });
         try {
           // Where the human is standing, passed as context rather than
           // instruction: "why did this fail?" needs a referent, but their own
           // words stay the request.
+          const tAgent = Date.now();
           const reply = await this.opts.chat!(resolved.tenantId, text, body.page ? String(body.page) : undefined);
+          const tReply = Date.now();
+          if (process.env.SQUIDCLAW_TIMING === "1") {
+            console.log(
+              `[timing] chatEndpoint bodyRead=${tBody - tChat}ms preAgent=${tAgent - tBody}ms ` +
+                `agent=${tReply - tAgent}ms total=${tReply - tChat}ms`,
+            );
+          }
           // "" is the flow-answered-for-itself sentinel the surfaces use. On a
           // request/response channel nothing else is coming, so say so.
           this.send(res, 200, { reply: reply || "(done)" });
