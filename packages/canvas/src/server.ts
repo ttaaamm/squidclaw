@@ -45,7 +45,12 @@ export interface DashboardOptions {
    * Talks to the tenant's agent — the same door Telegram knocks on, so the web
    * is a face rather than a second brain. Absent, the chat endpoint answers 501.
    */
-  chat?(tenantId: string | undefined, text: string, page?: string): Promise<string>;
+  chat?(
+    tenantId: string | undefined,
+    text: string,
+    page?: string,
+    onDelta?: (chunk: string) => void,
+  ): Promise<string>;
 }
 
 /**
@@ -285,11 +290,45 @@ export class DashboardServer {
     if (path === "/api/chat") {
       if (req.method !== "POST") return this.send(res, 405, { error: "use POST" });
       if (!this.opts.chat) return this.send(res, 501, { error: "this server has no agent attached" });
+      // Streaming is opt-in by Accept header, so every existing caller — and
+      // every curl in a test script — keeps getting one plain JSON reply.
+      const wantsStream = (req.headers.accept ?? "").includes("text/event-stream");
       const tChat = Date.now();
       return void this.write(req, res, async (body) => {
         const tBody = Date.now();
         const text = String(body.text ?? "").trim();
         if (!text) return this.send(res, 400, { error: "say something" });
+
+        if (wantsStream) {
+          res.writeHead(200, {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+            // Without this nginx buffers the whole response and streaming
+            // silently degrades to waiting — the exact thing it exists to fix.
+            "x-accel-buffering": "no",
+          });
+          const frame = (payload: unknown) => {
+            if (!res.writableEnded) res.write(`data: ${JSON.stringify(payload)}\n\n`);
+          };
+          try {
+            const reply = await this.opts.chat!(
+              resolved.tenantId,
+              text,
+              body.page ? String(body.page) : undefined,
+              (chunk) => frame({ delta: chunk }),
+            );
+            // The full text closes the stream even though the client has been
+            // assembling deltas: it is the authority, so a dropped frame heals
+            // instead of leaving a half-sentence on screen forever.
+            frame({ done: true, reply: reply || "(done)" });
+          } catch (err) {
+            frame({ error: String(err instanceof Error ? err.message : err) });
+          }
+          if (!res.writableEnded) res.end();
+          return;
+        }
+
         try {
           // Where the human is standing, passed as context rather than
           // instruction: "why did this fail?" needs a referent, but their own

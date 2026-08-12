@@ -284,6 +284,95 @@ describe("writing flows through the canvas", () => {
     }
   });
 
+  it("streams the reply as SSE when the caller asks for it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "sse-"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: new FlowStore(join(dir, "flows")),
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      {
+        token: TOKEN, pollMs: 10_000,
+        chat: async (_t, _text, _page, onDelta) => {
+          for (const part of ["Hey", " there", "!"]) onDelta?.(part);
+          return "Hey there!";
+        },
+      },
+    );
+    const p = await s.listen(0);
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/api/chat`, {
+        method: "POST",
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify({ text: "hi" }),
+      });
+      expect(res.headers.get("content-type")).toContain("text/event-stream");
+      // Without this nginx buffers the stream and it degrades to waiting.
+      expect(res.headers.get("x-accel-buffering")).toBe("no");
+
+      const frames = (await res.text())
+        .split("\n\n")
+        .filter((f) => f.startsWith("data: "))
+        .map((f) => JSON.parse(f.slice(6)) as Record<string, unknown>);
+
+      expect(frames.filter((f) => f.delta).map((f) => f.delta)).toEqual(["Hey", " there", "!"]);
+      // The final frame carries the whole reply, so a dropped delta heals.
+      expect(frames.at(-1)).toEqual({ done: true, reply: "Hey there!" });
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("still answers plain JSON when the caller does not ask to stream", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nosse-"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: new FlowStore(join(dir, "flows")),
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      { token: TOKEN, pollMs: 10_000, chat: async (_t, _x, _p, onDelta) => { onDelta?.("ignored"); return "whole"; } },
+    );
+    const p = await s.listen(0);
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/api/chat`, {
+        method: "POST",
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ text: "hi" }),
+      });
+      expect(res.headers.get("content-type")).toContain("application/json");
+      expect(await res.json()).toEqual({ reply: "whole" });
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("reports a failed stream in-band rather than hanging the reader", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ssefail-"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: new FlowStore(join(dir, "flows")),
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      { token: TOKEN, pollMs: 10_000, chat: async () => { throw new Error("the mind went quiet"); } },
+    );
+    const p = await s.listen(0);
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/api/chat`, {
+        method: "POST",
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify({ text: "hi" }),
+      });
+      // Headers already went out as 200, so the failure must arrive as a frame.
+      expect(res.status).toBe(200);
+      expect(await res.text()).toContain("the mind went quiet");
+    } finally {
+      await s.close();
+    }
+  });
+
   it("answers 501 for chat when no agent is attached", async () => {
     const res = await call("/api/chat", { method: "POST", body: JSON.stringify({ text: "hi" }) });
     expect(res.status).toBe(501);

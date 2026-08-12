@@ -156,12 +156,12 @@ const dashboard = new DashboardServer(
     // canvas inherits everything for free: session lanes, elicitation, quotas,
     // channel docking. Bind first — the turn router resolves a tenant from
     // (surface, chatId), and the tenant's own id is a stable web chatId.
-    chat: async (tenantId, text, page) => {
+    chat: async (tenantId, text, page, onDelta) => {
       if (!tenantId) throw new Error("the admin master view has no tenant to talk to — sign in with /canvas");
       const t0 = Date.now();
       platform.tenants.bind("web", tenantId, tenantId);
       const withPage = page && page !== "/" ? `${text}\n\n[the human is looking at ${page} in the canvas]` : text;
-      const reply = await platform.handle("web", tenantId, withPage);
+      const reply = await platform.handle("web", tenantId, withPage, undefined, onDelta);
       if (process.env.SQUIDCLAW_TIMING === "1") {
         console.log(`[timing] chat handle=${Date.now() - t0}ms tenant=${tenantId}`);
       }
