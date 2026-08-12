@@ -38,6 +38,39 @@ describe("the fast lane", () => {
     expect(tiers).toEqual(["haiku"]); // one breath, nothing else
   });
 
+  // Verbatim replies the fast lane actually gave, on 2026-08-12, about
+  // telegram.send — a tool it had never been shown and which does exactly what
+  // was asked. It has no tools at all, so any such claim is invented.
+  it.each([
+    "That tool is for sending messages to other agents in workflows, not external services like Telegram. I don't have a direct way to send Telegram messages from here.",
+    "I can't send Telegram messages from here.",
+    "I'm not able to reach external services like that.",
+    "You'd need to set that up through your Telegram bot or notifications system.",
+    "I don't have access to run shell commands.",
+  ])("escalates instead of inventing a limitation: %s", async (confabulation) => {
+    const { mind, tiers } = mindRecordingTiers({ haiku: confabulation, sonnet: "sent it" });
+    const agent = new Agent({ brains: mind, journal: new Journal(":memory:"), tenantId: "t", innerMe: "me", fastLane: true });
+
+    const reply = await agent.handleMessage("send me hi on telegram");
+    expect(reply).not.toBe(confabulation);
+    expect(tiers).toContain("sonnet"); // handed to the lane that actually has tools
+  });
+
+  // The net must not swallow ordinary conversation — over-escalating costs
+  // latency on every casual message.
+  it.each([
+    "I can't wait to see how it turns out!",
+    "I don't have a favourite, honestly.",
+    "Can't argue with that.",
+    "You'd need to be quicker than that 😄",
+  ])("leaves ordinary talk on the fast lane: %s", async (casual) => {
+    const { mind, tiers } = mindRecordingTiers({ haiku: casual, sonnet: "escalated" });
+    const agent = new Agent({ brains: mind, journal: new Journal(":memory:"), tenantId: "t", innerMe: "me", fastLane: true });
+
+    expect(await agent.handleMessage("what do you reckon?")).toBe(casual);
+    expect(tiers).toEqual(["haiku"]);
+  });
+
   it("knows which chats reach its human, so it never asks for an id it is bound to", async () => {
     let system = "";
     const mind = {

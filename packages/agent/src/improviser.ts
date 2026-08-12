@@ -88,6 +88,36 @@ export interface RunMeta {
 }
 
 const URL_IN_TEXT = /https?:\/\/[^\s<>")]+/;
+
+/**
+ * A fast-lane reply claiming it cannot do something.
+ *
+ * The fast lane is handed no tools at all, so it has no way to know what the
+ * agent can or cannot do — any such claim is invented. It once told a human
+ * "that tool is for sending messages to other agents in workflows, not
+ * external services like Telegram" about `telegram.send`, a tool it had never
+ * been shown and which does exactly what was asked.
+ *
+ * Two clauses, because one alone misfires: a phrase admitting inability AND a
+ * capability word near it. "I can't wait to see it" and "I don't have a
+ * favourite" are ordinary conversation and must survive; "I don't have a
+ * direct way to send Telegram messages" must not.
+ *
+ * The cost of over-escalating is a slower answer. The cost of under-escalating
+ * is a confident lie that then lives in the history and teaches the model to
+ * repeat it.
+ */
+const CONFABULATED_LIMIT = new RegExp(
+  [
+    // The original, narrower signals — kept verbatim; each was a real incident.
+    /\b(grant|enable|authoriz\w*|allow)\b[^.]{0,40}\b(permission|web\s?search|access)\b/.source,
+    /claude\s?code|interactive session|connector settings|non-?interactive|oauth|need (?:your )?permission/.source,
+    // Any admission of inability that lands near something the agent can do.
+    /\b(?:can'?t|cannot|couldn'?t|unable to|don'?t have|do not have|no (?:direct )?way to|not able to|you'?d need to|you would need to|is for [^.]{0,30}not)\b[^.]{0,70}\b(?:send|messag\w+|access|reach|do that|run|execute|fetch|post|publish|email|telegram|whatsapp|instagram|ssh|shell|browse|search|tool|capabilit\w+|integrat\w+|external)/
+      .source,
+  ].join("|"),
+  "i",
+);
 const AUTO_READ_CHARS = 4_000;
 /** A tool result bigger than this gets trimmed — context is for thinking, not dumping. */
 const TOOL_RESULT_CHARS = 3_000;
@@ -547,9 +577,7 @@ export class Agent {
       // is a confabulation, not the truth. Left in history it self-reinforces
       // (haiku copies its own past refusals). Discard and escalate: the deep
       // mind actually has the tool, or fails with a real reason.
-      if (/\b(grant|enable|authoriz\w*|allow)\b[^.]{0,40}\b(permission|web\s?search|access)\b|claude\s?code|interactive session|connector settings|non-?interactive|oauth|need (?:your )?permission|can'?t (?:access|search|reach|use)\b[^.]{0,25}\b(?:web|internet|online|search)/i.test(reply)) {
-        return undefined;
-      }
+      if (CONFABULATED_LIMIT.test(reply)) return undefined;
 
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
