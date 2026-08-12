@@ -2,11 +2,19 @@ import { describe, it, expect } from "vitest";
 import { CliBrain, parseDecision, sanitizeExecError } from "@squidclaw/brains";
 
 describe("cli brain (thinks on the human's subscription)", () => {
+  // The decision envelope only exists when there is a decision to make — that
+  // is, when tools are on offer. These two pass tools for that reason.
+  const SEARCH = { name: "web__search", description: "search the web", input_schema: { type: "object" } };
+
   it("turns a structured decision into a tool call", async () => {
     const brain = new CliBrain({
       exec: async () => JSON.stringify({ action: "use_tool", tool: "web__search", input: { query: "n8n" } }),
     });
-    const res = await brain.complete({ tier: "strong", messages: [{ role: "user", content: "search" }] });
+    const res = await brain.complete({
+      tier: "strong",
+      messages: [{ role: "user", content: "search" }],
+      tools: [SEARCH],
+    });
     expect(res.toolCalls).toHaveLength(1);
     expect(res.toolCalls[0].name).toBe("web__search");
     expect(res.toolCalls[0].input).toEqual({ query: "n8n" });
@@ -15,9 +23,29 @@ describe("cli brain (thinks on the human's subscription)", () => {
 
   it("turns a reply decision into text", async () => {
     const brain = new CliBrain({ exec: async () => JSON.stringify({ action: "reply", reply: "All done." }) });
-    const res = await brain.complete({ tier: "cheap", messages: [] });
+    const res = await brain.complete({ tier: "cheap", messages: [], tools: [SEARCH] });
     expect(res.text).toBe("All done.");
     expect(res.toolCalls).toEqual([]);
+  });
+
+  // With nothing to choose between, asking for a decision backfires: the CLI
+  // injects its own StructuredOutput tool, and smaller models mistake it for a
+  // request to format content — answering "hi" with "give me the data you want
+  // structured". So a toolless call asks for prose and returns it verbatim,
+  // even when that prose happens to look like an envelope.
+  it("asks for plain prose when there are no tools, and passes it through untouched", async () => {
+    let args: string[] = [];
+    const brain = new CliBrain({
+      exec: async (a) => {
+        args = a;
+        return JSON.stringify({ action: "reply", reply: "All done." });
+      },
+    });
+    const res = await brain.complete({ tier: "cheap", messages: [{ role: "user", content: "hi" }] });
+
+    expect(args).not.toContain("--json-schema");
+    expect(res.toolCalls).toEqual([]);
+    expect(res.text).toBe('{"action":"reply","reply":"All done."}');
   });
 
   it("passes the chosen model and system prompt to the CLI", async () => {

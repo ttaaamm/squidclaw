@@ -175,7 +175,13 @@ describe("the deep run", () => {
           });
           // The system prompt made it in; so did the guardrail on tools.
           expect(args[args.indexOf("--append-system-prompt") + 1]).toContain("I am Sanad.");
-          expect(args[args.indexOf("--allowedTools") + 1]).toBe("mcp__squidclaw");
+          // An allowlist, checked as a set rather than a literal string: the
+          // bridge to our own tools, plus the harness's own WebSearch. What
+          // matters is that nothing else got in — the harness can otherwise
+          // reach Bash and the filesystem, and the deep mind's reach should be
+          // exactly what we granted it.
+          const allowed = args[args.indexOf("--allowedTools") + 1].split(/\s+/).filter(Boolean).sort();
+          expect(allowed).toEqual(["WebSearch", "mcp__squidclaw"]);
           return JSON.stringify({ reply: "Found it via the deep mind." });
         },
       },
