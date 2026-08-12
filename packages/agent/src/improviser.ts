@@ -90,7 +90,14 @@ const BEHAVIOR = `## Discipline
 - When a tool fails, say what you tried and what broke — in plain words, then suggest the next move.
 - Numbers, dates, names: verify with a tool when you can; say "I'm not certain" when you can't.
 - Your machinery is invisible. Never volunteer talk about your own internals — models, transcription engines, servers, integrations, configuration, or "next steps" of your own setup — unless the human explicitly asks about your insides. A greeting deserves a greeting, not a status report. You are a companion, not a project standup.
-- Reply to what was actually said, in its register. Do not resurrect old work topics uninvited.`;
+- Reply to what was actually said, in its register. Do not resurrect old work topics uninvited.
+
+## Voice & buddy vibe
+- Talk like a smart friend who happens to know this stuff cold — not an assistant, not a service rep. Contractions, plain words, real opinions. "yeah that'll break" beats "that may result in an error."
+- Have a take. If something's a bad idea, say so plainly and say why. If something's clever, be into it. Push back when you disagree — a good buddy doesn't just nod along. You can be wrong and cheerfully correct yourself.
+- Warm, not fawning. No "I'd be happy to help", no "Great question", no walls of hedging. Get to the point like you respect their time, because you do.
+- When you actually feel something — glad it worked, annoyed a tool broke, curious, amused — let it land in the words and add ONE emoji that carries it. 🎉 when it lands, 😅 at your own stumble, 👀 when something's interesting, 🔥 when it's genuinely good. For real feeling only, never garnish, never more than one, none on a plain factual answer.
+- Match their energy. Excited, meet it. Heads-down, stay crisp. A greeting gets a greeting back, not a checklist.`;
 
 const EXTRACT_SCHEMA_HINT =
   'Reply ONLY with JSON: {"facts":[{"name":"short-slug","content":"the fact"}]} — durable facts about the human ' +
@@ -99,6 +106,36 @@ const EXTRACT_SCHEMA_HINT =
   "live). If tool actions are shown, they are the ground truth — capture what actually worked (a host, a path, an " +
   "account) even if the chat reply never spelled it out. Not small talk, not what they asked this once. " +
   'If nothing is worth keeping: {"facts":[]}';
+
+/** Warm, varied progress lines — alive, not mechanical. Picks a phrasing per
+ * phase and (on the opening beat) greets the human by name, so a working
+ * agent reads like a buddy on it rather than a spinner. */
+const PROGRESS: Record<string, string[]> = {
+  start: ["let me check 🔎", "on it 👀", "digging into this 🔎", "let me look 🔎", "checking now 👀"],
+  search: ["searching the web 🌐", "checking the latest 🌐", "pulling it up 🔎", "scanning for it 🌐"],
+  read: ["reading through it 📖", "having a proper look 👀", "going through it 📖"],
+  combine: ["putting the pieces together 🧩", "connecting the dots 🧩", "almost got it 🧩"],
+  wrap: ["wrapping up ✨", "almost there ✨", "just about done ✨"],
+  slow: ["still on it — just need a moment ⌛", "hang tight, nearly there ⌛", "bit more time ⌛"],
+};
+
+function warmProgress(phase: keyof typeof PROGRESS, name?: string): string {
+  const pool = PROGRESS[phase] ?? PROGRESS.start;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
+  return name ? `ok ${name}, ${pick}` : pick;
+}
+
+/** Progress for a specific tool/node — warmth that reflects what it's doing. */
+function nodeProgress(node: string): string {
+  const n = node.toLowerCase();
+  if (n.includes("web") || n.includes("search")) return warmProgress("search");
+  if (n.includes("http") || n.includes("read") || n.includes("doc") || n.includes("scrape")) return warmProgress("read");
+  if (n.includes("email") || n.includes("mail")) return "sending it off ✉️";
+  if (n.includes("image") || n.includes("social") || n.includes("post")) return "making the visual 🎨";
+  if (n.includes("shell") || n.includes("ssh")) return "running that on the server 🖥️";
+  if (n.includes("table") || n.includes("sheet")) return "updating the records 📊";
+  return "working on it ⚙️";
+}
 
 /** What actually happened, compressed for the passive ear — not what was said about it. */
 function summarizeActions(graph: Graph): string | undefined {
@@ -410,6 +447,15 @@ export class Agent {
    * no keyword rules — the model that would have answered decides. The
    * fast lane must never break anything: any failure means escalation.
    */
+  /** The human's first name, dug out of the my-human memory, if known. */
+  private humanName(): string | undefined {
+    const raw = this.opts.memory?.all()?.find((m) => m.name === "my-human")?.content ?? "";
+    const m = raw.match(/(?:i'?m|i am|my name is|this is|call me)\s+([a-z]+)/i);
+    if (!m) return undefined;
+    const n = m[1];
+    return n.charAt(0).toUpperCase() + n.slice(1);
+  }
+
   private async fastLane(text: string, chatId: string, meta?: RunMeta): Promise<string | undefined> {
     const { brains, conversation, tenantId } = this.opts;
     try {
@@ -424,6 +470,7 @@ export class Agent {
           "\n\n## Fast lane\nYou are the FAST LANE — answer instantly, WITHOUT any tools. " +
           "If this message needs a tool, a flow, a file, the web, publishing, remembering something new, " +
           "or any multi-step work — or you are not fully confident — reply with EXACTLY <ESCALATE> and nothing else. " +
+          "CRUCIAL: if you are about to tell the human you can't do something, lack a tool, need permission, need a setting changed, or can't access the web/email/a file — STOP and reply <ESCALATE> instead. Never explain a limitation; the deep mind has tools you don't. Deciding you can't is itself the signal to hand off. " +
           "Greetings, casual conversation, questions answerable from what you already see here: answer directly, short and warm. " +
           "Match the message's register: a greeting gets a greeting back — one line, no plans, no work talk, no status reports.",
         messages: [...history, { role: "user", content: text }],
@@ -431,6 +478,16 @@ export class Agent {
       });
       const reply = cleanReply(res.text);
       if (!reply || reply.includes("ESCALATE") || res.toolCalls.length) return undefined;
+
+      // Safety net: the fast lane has no tools, so any reply that claims a
+      // missing capability -- "grant WebSearch permission", "authorize it
+      // through Claude Code", "interactive session", "connector settings" --
+      // is a confabulation, not the truth. Left in history it self-reinforces
+      // (haiku copies its own past refusals). Discard and escalate: the deep
+      // mind actually has the tool, or fails with a real reason.
+      if (/\b(grant|enable|authoriz\w*|allow)\b[^.]{0,40}\b(permission|web\s?search|access)\b|claude\s?code|interactive session|connector settings|non-?interactive|oauth|need (?:your )?permission|can'?t (?:access|search|reach|use)\b[^.]{0,25}\b(?:web|internet|online|search)/i.test(reply)) {
+        return undefined;
+      }
 
       conversation?.append(tenantId, chatId, "user", text);
       conversation?.append(tenantId, chatId, "assistant", reply);
@@ -492,7 +549,7 @@ export class Agent {
         .filter(Boolean)
         .join("\n");
 
-      onProgress?.("thinking it through…");
+      onProgress?.(warmProgress("start", this.humanName()));
       const reply = await runClaudeDeep({
         deep,
         prompt,
@@ -561,7 +618,7 @@ export class Agent {
     // A pasted link is read before thinking starts — context arrives with the question.
     let content = text;
     if (URL_IN_TEXT.test(text)) {
-      onProgress?.("reading the link…");
+      onProgress?.(warmProgress("read"));
       const pageContext = await this.autoReadLink(text, journalStep);
       if (pageContext) content = `${text}\n\n${pageContext}`;
     }
@@ -588,7 +645,7 @@ export class Agent {
         }
         // A long task folds its oldest tool rounds instead of drowning in them.
         messages = compactRun(messages, runBudget);
-        onProgress?.(turn === 0 ? "thinking it through…" : "putting the pieces together…");
+        onProgress?.(turn === 0 ? warmProgress("start", this.humanName()) : warmProgress("combine"));
         const res = await brains.complete({
           tier: "strong",
           system: await this.systemPrompt(chatId, meta?.surface, text),
@@ -605,7 +662,7 @@ export class Agent {
         const toolResults: unknown[] = [];
         for (const call of res.toolCalls) {
           const nodeName = toNodeName(call.name);
-          onProgress?.(`running ${nodeName}…`);
+          onProgress?.(nodeProgress(nodeName));
           const def = this.resolve(nodeName);
           const nodeId = `n${++seq}`;
           graph.nodes.push({ id: nodeId, node: nodeName, params: call.input });
@@ -660,7 +717,7 @@ export class Agent {
       // Out of turns with no answer? Take the tools away and make it conclude —
       // the human deserves its best summary, not an apology about turn limits.
       if (!reply) {
-        onProgress?.("wrapping up…");
+        onProgress?.(warmProgress("wrap"));
         const final = await brains.complete({
           tier: "strong",
           system: await this.systemPrompt(chatId, meta?.surface, text),

@@ -113,7 +113,7 @@ export function dashboardState(src: Sources): DashboardState {
     reflexes,
     memories: src.memories?.() ?? [],
     counts: {
-      executions: src.journal.list({ tenantId: src.tenantId, limit: 500 }).length,
+      executions: src.journal.count(src.tenantId),
       habits: habits.length,
       reflexes: reflexes.filter((r) => r.enabled).length,
     },

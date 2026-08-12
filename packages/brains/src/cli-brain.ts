@@ -44,7 +44,6 @@ const DECISION_SCHEMA = {
 } as const;
 
 function renderTools(tools: ToolSpec[]): string {
-  if (!tools.length) return "You have no tools.";
   return [
     "You have these tools:",
     ...tools.map((t) => `- ${t.name}: ${t.description}\n  input schema: ${JSON.stringify(t.input_schema)}`),
@@ -102,8 +101,39 @@ export class CliBrain implements Mind {
   }
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
+    const tools = req.tools ?? [];
+
+    // No tools means there is nothing to actually decide between -- the
+    // answer is always "reply". Forcing a decision through --json-schema
+    // anyway makes the CLI auto-inject its own StructuredOutput tool for
+    // the model to call, and smaller models (haiku) reliably confuse that
+    // internal submission mechanism with a user-facing request to "format
+    // some content" -- producing replies like "give me the data you want
+    // structured" to a plain "hi". Skipping the schema entirely for this
+    // case sidesteps the confusion at the source instead of prompting
+    // around it (verified: the same model, same input, plain-text call,
+    // answers "hi" with a plain greeting).
+    if (tools.length === 0) {
+      const prompt = [
+        "Conversation so far:",
+        renderTranscript(req.messages),
+        "",
+        "Reply to the human directly and naturally.",
+      ].join("\n");
+      const args = ["-p", prompt, "--model", this.models[req.tier]];
+      if (req.system) args.push("--append-system-prompt", req.system);
+
+      let text: string;
+      try {
+        text = (await this.exec(args, this.timeoutMs)).trim();
+      } catch {
+        text = (await this.exec(args, this.timeoutMs)).trim();
+      }
+      return { text, toolCalls: [], assistantContent: [{ type: "text", text }] };
+    }
+
     const prompt = [
-      renderTools(req.tools ?? []),
+      renderTools(tools),
       "",
       "Conversation so far:",
       renderTranscript(req.messages),

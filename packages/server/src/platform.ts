@@ -99,6 +99,14 @@ export class Platform {
    */
   linkPartnerAccount(externalId: string, name: string): { tenant: Tenant; invite: string; canvasLink: string } {
     const tenant = this.tenants.findOrCreateByExternal(externalId, name);
+    // Provision workspace on first SSO so canvas works before tenant chats via Telegram.
+    const dir = this.tenantDir(tenant.id);
+    if (!existsSync(dir)) {
+      mkdirSync(join(dir, "flows", "_drafts"), { recursive: true });
+      mkdirSync(join(dir, "journal"), { recursive: true });
+      mkdirSync(join(dir, "reflexes"), { recursive: true });
+      mkdirSync(join(dir, "memory"), { recursive: true });
+    }
     return { tenant, invite: `/join ${tenant.token}`, canvasLink: this.canvasLink(tenant.id) };
   }
 
@@ -186,6 +194,12 @@ export class Platform {
       },
       {
         say: (m) => notify(m),
+        runPrompt: async (p) => {
+          // Scheduled agent task: run the instruction through the agent, docked to
+          // the tenant conversation so the human's reply continues the same thread.
+          const reply = await organism.agent.handleMessage(p, tenant.id, undefined, { surface: "reflex" });
+          if (reply) notify(reply);
+        },
         onFire: (r) => notify(`⏰ reflex "${r.reflex}" fired — ${r.status}${r.detail ? `: ${r.detail}` : ""}`),
       },
     );

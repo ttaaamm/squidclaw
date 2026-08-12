@@ -9,6 +9,7 @@ import {
   binaryBuffer, binaryMeta, branchesOf, withBranches,
   type BinaryValue, type Item, type NodeContext, type NodeDef,
 } from "@squidclaw/kernel";
+import { getExecutor } from "./executors/index.js"; // side-effect: registers all node executors
 
 /**
  * The n8n dialect, spoken natively.
@@ -41,7 +42,7 @@ const SUPPORTED = new Set([
   "n8n-nodes-base.spreadsheetFile",
 ]);
 
-export const isSupportedN8nType = (type: string): boolean => SUPPORTED.has(type);
+export const isSupportedN8nType = (type: string): boolean => SUPPORTED.has(type) || !!getExecutor(type);
 
 const hostRequire = createRequire(import.meta.url);
 
@@ -553,7 +554,16 @@ async function executeStep(
         return out;
       }
 
-      default:
+      default: {
+        // Registered executors (AI models, Slack, Gmail, …) plug in here.
+        // Params are expression-resolved against the first item, matching
+        // how the hardcoded cases above read their parameters.
+        const executor = getExecutor(type);
+        if (executor) {
+          const resolved = resolveExpr(parameters, items[0], items, ctx) as Record<string, unknown>;
+          return executor(resolved, items, ctx, params);
+        }
         throw new Error(`n8n step type "${type}" has no native support yet`);
+      }
     }
 }

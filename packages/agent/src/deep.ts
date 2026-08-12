@@ -240,9 +240,16 @@ export async function runClaudeDeep(opts: {
       "-p", opts.prompt,
       "--model", opts.deep.model ?? "sonnet",
       "--mcp-config", opts.mcpConfigPath,
-      // Strictly our bridge — a tenant's words must never reach the host filesystem.
+      // Strictly our bridge, plus WebSearch -- a tenant's words must never
+      // reach the host filesystem, but WebSearch touches neither the host
+      // nor any tenant's data, only the open web, so it carries none of that
+      // risk. Without it, the CLI's own permission gate blocks WebSearch
+      // outright (no human is present in this headless context to approve
+      // it), and the model narrates the block instead of failing clean --
+      // e.g. "I need your permission to use WebSearch... waiting for
+      // approval", read verbatim from a real Telegram reply.
       // Server-level form: stable across CLI versions (the __* wildcard is not).
-      "--allowedTools", "mcp__squidclaw",
+      "--allowedTools", "mcp__squidclaw WebSearch",
       "--append-system-prompt", opts.system,
       "--json-schema", REPLY_SCHEMA,
     ],

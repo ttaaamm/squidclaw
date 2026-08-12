@@ -14,6 +14,8 @@ export interface SchedulerOptions {
   onFire?: (result: FireResult) => void;
   /** How a reminder reaches its human. Message-reflexes need this, not a habit. */
   say?: (message: string) => void | Promise<void>;
+  /** How a prompt-reflex hands its instruction to the agent. */
+  runPrompt?: (prompt: string) => void | Promise<void>;
   /** Injectable clock so tests don't wait for the wall to move. */
   now?: () => Date;
 }
@@ -73,6 +75,8 @@ export class Scheduler {
     try {
       if (reflex.flow) {
         await this.runHabit(reflex.flow, reflex.args ?? {});
+      } else if (reflex.prompt) {
+        await this.opts.runPrompt?.(reflex.prompt);
       } else if (reflex.message) {
         await this.opts.say?.(`⏰ ${reflex.message}`);
       }

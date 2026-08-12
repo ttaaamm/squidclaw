@@ -95,6 +95,15 @@ export class Journal {
     return rows.map((r) => this.get(r.id)!);
   }
 
+  /** Cheap COUNT(*) — never loads execution bodies (the list() path does, which
+   * is catastrophic on a journal bloated with image/pdf step blobs). */
+  count(tenantId?: string): number {
+    const row = (tenantId
+      ? this.db.prepare(`SELECT COUNT(*) AS n FROM executions WHERE tenant_id = ?`).get(tenantId)
+      : this.db.prepare(`SELECT COUNT(*) AS n FROM executions`).get()) as { n: number };
+    return Number(row.n);
+  }
+
   close(): void {
     this.db.close();
   }

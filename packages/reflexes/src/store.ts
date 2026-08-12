@@ -9,6 +9,8 @@ export interface Reflex {
   flow?: string;
   /** A reminder: just say this to the human when firing. Either this or `flow`. */
   message?: string;
+  /** An instruction handed to the AGENT when firing — for scheduled multi-step tasks. */
+  prompt?: string;
   args?: Record<string, unknown>;
   /** 5-field cron, or an alias like @daily. */
   cron?: string;
