@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import type { CompleteRequest, CompleteResult, Mind, ToolSpec } from "./router.js";
 
@@ -78,12 +78,27 @@ export interface CliBrainOptions {
   timeoutMs?: number;
   /** Injectable for tests — defaults to spawning the real `claude` binary. */
   exec?: (args: string[], timeoutMs: number) => Promise<string>;
+  /**
+   * Same call, but reporting stdout as it arrives. Separate from `exec`
+   * because `execFile` buffers to completion by design — you cannot stream
+   * from it however you hold it.
+   */
+  execStream?: (
+    args: string[],
+    timeoutMs: number,
+    onDelta: (chunk: string) => void,
+  ) => Promise<string>;
 }
 
 export class CliBrain implements Mind {
   private models: { cheap: string; strong: string };
   private timeoutMs: number;
   private exec: (args: string[], timeoutMs: number) => Promise<string>;
+  private execStream: (
+    args: string[],
+    timeoutMs: number,
+    onDelta: (chunk: string) => void,
+  ) => Promise<string>;
 
   constructor(opts: CliBrainOptions = {}) {
     this.models = opts.models ?? { cheap: "haiku", strong: "sonnet" };
@@ -98,6 +113,41 @@ export class CliBrain implements Mind {
           throw sanitizeExecError(err);
         }
       });
+
+    this.execStream =
+      opts.execStream ??
+      ((args, timeoutMs, onDelta) =>
+        new Promise<string>((resolve, reject) => {
+          const child = spawn("claude", args);
+          let out = "";
+          let err = "";
+          let settled = false;
+          const finish = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          };
+          const timer = setTimeout(() => {
+            child.kill("SIGKILL");
+            finish(() => reject(new Error(`claude CLI timed out after ${timeoutMs}ms`)));
+          }, timeoutMs);
+
+          child.stdout.on("data", (b: Buffer) => {
+            const chunk = b.toString();
+            out += chunk;
+            onDelta(chunk);
+          });
+          child.stderr.on("data", (b: Buffer) => (err += b.toString()));
+          child.on("error", (e) => finish(() => reject(sanitizeExecError(e))));
+          child.on("close", (code) =>
+            finish(() =>
+              code === 0
+                ? resolve(out)
+                : reject(sanitizeExecError({ code, stderr: err, message: `claude exited ${code}` })),
+            ),
+          );
+        }));
   }
 
   async complete(req: CompleteRequest): Promise<CompleteResult> {
@@ -124,10 +174,29 @@ export class CliBrain implements Mind {
       if (req.system) args.push("--append-system-prompt", req.system);
 
       let text: string;
-      try {
-        text = (await this.exec(args, this.timeoutMs)).trim();
-      } catch {
-        text = (await this.exec(args, this.timeoutMs)).trim();
+      if (req.onDelta) {
+        // A consumer that throws — a browser that hung up mid-reply — must not
+        // take the turn down with it. Guarded here rather than inside any one
+        // execStream, so the promise holds for every implementation.
+        const onDelta = req.onDelta;
+        const safe = (chunk: string) => {
+          try {
+            onDelta(chunk);
+          } catch {
+            /* the reply still completes; only the live view misses a frame */
+          }
+        };
+        // Streaming deliberately does not retry. The retry below exists to
+        // paper over a flaky first call, but a second attempt would replay
+        // text the human has already watched appear. Callers that stream
+        // (the fast lane) treat any stumble as a reason to escalate anyway.
+        text = (await this.execStream(args, this.timeoutMs, safe)).trim();
+      } else {
+        try {
+          text = (await this.exec(args, this.timeoutMs)).trim();
+        } catch {
+          text = (await this.exec(args, this.timeoutMs)).trim();
+        }
       }
       return { text, toolCalls: [], assistantContent: [{ type: "text", text }] };
     }

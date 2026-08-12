@@ -48,6 +48,78 @@ describe("cli brain (thinks on the human's subscription)", () => {
     expect(res.text).toBe('{"action":"reply","reply":"All done."}');
   });
 
+  it("streams the reply in fragments, and still returns the whole thing", async () => {
+    const seen: string[] = [];
+    const brain = new CliBrain({
+      execStream: async (_args, _t, onDelta) => {
+        for (const part of ["Hey", " there", "!"]) onDelta(part);
+        return "Hey there!";
+      },
+      exec: async () => {
+        throw new Error("must not fall back to the buffering path when streaming");
+      },
+    });
+    const res = await brain.complete({
+      tier: "cheap",
+      messages: [{ role: "user", content: "hi" }],
+      onDelta: (c) => seen.push(c),
+    });
+    expect(seen).toEqual(["Hey", " there", "!"]);
+    expect(res.text).toBe("Hey there!");
+  });
+
+  it("ignores onDelta when tools are on offer — half a decision is unreadable", async () => {
+    const seen: string[] = [];
+    const brain = new CliBrain({
+      exec: async () => JSON.stringify({ action: "use_tool", tool: "web__search", input: {} }),
+      execStream: async () => {
+        throw new Error("the tool path must not stream");
+      },
+    });
+    const res = await brain.complete({
+      tier: "strong",
+      messages: [],
+      tools: [SEARCH],
+      onDelta: (c) => seen.push(c),
+    });
+    expect(seen).toEqual([]);
+    expect(res.toolCalls).toHaveLength(1);
+  });
+
+  it("does not replay a stream after a failure — it gives up instead", async () => {
+    let attempts = 0;
+    const brain = new CliBrain({
+      execStream: async (_a, _t, onDelta) => {
+        attempts++;
+        onDelta("half a sen");
+        throw new Error("CLI died");
+      },
+    });
+    await expect(
+      brain.complete({ tier: "cheap", messages: [], onDelta: () => {} }),
+    ).rejects.toThrow("CLI died");
+    // Retrying would make the human watch the same words twice.
+    expect(attempts).toBe(1);
+  });
+
+  it("survives a consumer that throws mid-stream", async () => {
+    const brain = new CliBrain({
+      execStream: async (_a, _t, onDelta) => {
+        onDelta("a");
+        onDelta("b");
+        return "ab";
+      },
+    });
+    const res = await brain.complete({
+      tier: "cheap",
+      messages: [],
+      onDelta: () => {
+        throw new Error("the browser hung up");
+      },
+    });
+    expect(res.text).toBe("ab");
+  });
+
   it("passes the chosen model and system prompt to the CLI", async () => {
     let captured: string[] = [];
     const brain = new CliBrain({

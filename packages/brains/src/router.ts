@@ -25,6 +25,16 @@ export interface CompleteRequest {
   messages: unknown[];
   tools?: ToolSpec[];
   maxTokens?: number;
+  /**
+   * Called with each fragment of the reply as it arrives, for surfaces that
+   * can show text appearing.
+   *
+   * Only honoured when there are no tools: with tools the answer is a JSON
+   * decision, and half a decision is not something a human can read. A brain
+   * that cannot stream ignores this and still returns the whole reply, so
+   * passing it is never a reason for a surface to break.
+   */
+  onDelta?: (chunk: string) => void;
 }
 
 /** Anything that can think. The agent never cares which door it came through. */
