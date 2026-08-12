@@ -213,6 +213,73 @@ describe("writing flows through the canvas", () => {
     expect(flows.all()).toHaveLength(0);
   });
 
+  it("talks to the agent, and passes the page as context", async () => {
+    const asked: Array<{ tenantId?: string; text: string; page?: string }> = [];
+    const dir = mkdtempSync(join(tmpdir(), "chat-"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: new FlowStore(join(dir, "flows")),
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      {
+        token: TOKEN, pollMs: 10_000,
+        chat: async (tenantId, text, page) => {
+          asked.push({ tenantId, text, page });
+          return "on it";
+        },
+      },
+    );
+    const p = await s.listen(0);
+    const say = (body: unknown) =>
+      fetch(`http://127.0.0.1:${p}/api/chat`, {
+        method: "POST",
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    try {
+      const res = await say({ text: "build me a news flow", page: "/flows/abc" });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ reply: "on it" });
+      expect(asked[0]).toMatchObject({ text: "build me a news flow", page: "/flows/abc" });
+
+      expect((await say({ text: "   " })).status).toBe(400);
+      expect((await fetch(`http://127.0.0.1:${p}/api/chat`, { headers: { cookie: `sc_token=${TOKEN}` } })).status).toBe(405);
+      // No token -> no conversation.
+      expect((await fetch(`http://127.0.0.1:${p}/api/chat`, { method: "POST", body: "{}" })).status).toBe(401);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("answers 501 for chat when no agent is attached", async () => {
+    const res = await call("/api/chat", { method: "POST", body: JSON.stringify({ text: "hi" }) });
+    expect(res.status).toBe(501);
+  });
+
+  it("turns the flow-answered-for-itself sentinel into something visible in chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "chat2-"));
+    const s = new DashboardServer(
+      {
+        journal: new Journal(":memory:"), flows: new FlowStore(join(dir, "flows")),
+        reflexes: new ReflexStore(join(dir, "reflexes")),
+        mind: { via: "cli", tools: 1 }, tenantId: "dev",
+      },
+      { token: TOKEN, pollMs: 10_000, chat: async () => "" },
+    );
+    const p = await s.listen(0);
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/api/chat`, {
+        method: "POST",
+        headers: { cookie: `sc_token=${TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ text: "go" }),
+      });
+      expect(await res.json()).toEqual({ reply: "(done)" });
+    } finally {
+      await s.close();
+    }
+  });
+
   it("rejects an unsupported verb on a habit", async () => {
     await call("/api/habits", { method: "POST", body: JSON.stringify(flowBody("verbs")) });
     expect((await call("/api/habits/verbs", { method: "PUT", body: "{}" })).status).toBe(405);

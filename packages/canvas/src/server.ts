@@ -41,6 +41,11 @@ export interface DashboardOptions {
    * the HTTP door.
    */
   refresh?(tenantId: string | undefined): Promise<void> | void;
+  /**
+   * Talks to the tenant's agent — the same door Telegram knocks on, so the web
+   * is a face rather than a second brain. Absent, the chat endpoint answers 501.
+   */
+  chat?(tenantId: string | undefined, text: string, page?: string): Promise<string>;
 }
 
 /**
@@ -237,6 +242,28 @@ export class DashboardServer {
           this.send(res, 200, { ok: true, name, result });
         } catch (err) {
           this.send(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) });
+        }
+      });
+    }
+
+    // The web face. Same agent, same memory, same habits as Telegram — the
+    // canvas is another door onto one mind, not a second one.
+    if (path === "/api/chat") {
+      if (req.method !== "POST") return this.send(res, 405, { error: "use POST" });
+      if (!this.opts.chat) return this.send(res, 501, { error: "this server has no agent attached" });
+      return void this.write(req, res, async (body) => {
+        const text = String(body.text ?? "").trim();
+        if (!text) return this.send(res, 400, { error: "say something" });
+        try {
+          // Where the human is standing, passed as context rather than
+          // instruction: "why did this fail?" needs a referent, but their own
+          // words stay the request.
+          const reply = await this.opts.chat!(resolved.tenantId, text, body.page ? String(body.page) : undefined);
+          // "" is the flow-answered-for-itself sentinel the surfaces use. On a
+          // request/response channel nothing else is coming, so say so.
+          this.send(res, 200, { reply: reply || "(done)" });
+        } catch (err) {
+          this.send(res, 500, { error: String(err instanceof Error ? err.message : err) });
         }
       });
     }

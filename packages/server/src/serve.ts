@@ -152,6 +152,16 @@ const dashboard = new DashboardServer(
       const organism = await platform.organismFor(tenantId);
       organism.agent.registerHabits();
     },
+    // Web chat. Routed through platform.handle exactly like Telegram, so the
+    // canvas inherits everything for free: session lanes, elicitation, quotas,
+    // channel docking. Bind first — the turn router resolves a tenant from
+    // (surface, chatId), and the tenant's own id is a stable web chatId.
+    chat: async (tenantId, text, page) => {
+      if (!tenantId) throw new Error("the admin master view has no tenant to talk to — sign in with /canvas");
+      platform.tenants.bind("web", tenantId, tenantId);
+      const withPage = page && page !== "/" ? `${text}\n\n[the human is looking at ${page} in the canvas]` : text;
+      return platform.handle("web", tenantId, withPage);
+    },
     run: async (tenantId, name, args) => {
       if (!tenantId) throw new Error("the admin master view has no tenant to run as — sign in with /canvas");
       const denied = platform.tenants.checkQuota(tenantId, "habit");
