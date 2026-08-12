@@ -354,7 +354,22 @@ export class Agent {
   }
 
   /** Who it is, how it sounds, and what it knows — assembled fresh each turn. */
-  private async systemPrompt(chatId: string, surface?: string, messageText?: string): Promise<string> {
+  /**
+   * @param lean skip the expensive context — semantic recall (an embedding
+   *   round-trip) and flow instruction sheets (disk reads per promoted flow).
+   *   Measured at 4.6s per turn on a warm tenant, to build 4KB of text.
+   *
+   *   Only the fast lane passes this. It holds no tools and must escalate for
+   *   anything needing a flow or a remembered detail, so ranking memories by
+   *   relevance to "hi" buys nothing it is allowed to use. Core identity
+   *   memories are still pinned, so it never forgets who it is talking to.
+   */
+  private async systemPrompt(
+    chatId: string,
+    surface?: string,
+    messageText?: string,
+    lean = false,
+  ): Promise<string> {
     const parts = [this.opts.innerMe, BEHAVIOR];
 
     // Situational awareness: an agent that doesn't know the date feels broken.
@@ -378,7 +393,10 @@ export class Agent {
       // surfaces the one that matters for THIS message ("ssh again" finds
       // the memory that says how, even if it was written weeks ago).
       const CORE = new Set(["my-human", "my-purpose"]);
-      const relevant = messageText ? ((await this.opts.memory?.recall(messageText, { limit: MEMORY_DIGEST_LIMIT })) ?? []) : [];
+      const relevant =
+        messageText && !lean
+          ? ((await this.opts.memory?.recall(messageText, { limit: MEMORY_DIGEST_LIMIT })) ?? [])
+          : [];
       const chosen: typeof known = [];
       const chosenNames = new Set<string>();
       const add = (m: (typeof known)[number]) => {
@@ -398,7 +416,7 @@ export class Agent {
     // Instruction sheets: a flow can carry its own deep usage notes (its
     // SKILL.md), loaded only when the message touches its territory — real
     // guidance for complex tools, without paying its token cost every turn.
-    if (messageText && this.opts.flows) {
+    if (messageText && !lean && this.opts.flows) {
       const lower = messageText.toLowerCase();
       let loaded = 0;
       for (const flow of this.opts.flows.promoted()) {
@@ -468,7 +486,7 @@ export class Agent {
         content: t.content,
       }));
       const tHistory = Date.now();
-      const system = await this.systemPrompt(chatId, meta?.surface, text);
+      const system = await this.systemPrompt(chatId, meta?.surface, text, true);
       const tPrompt = Date.now();
       const res = await brains.complete({
         tier: "cheap",
