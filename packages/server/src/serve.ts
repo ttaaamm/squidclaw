@@ -11,7 +11,7 @@ import { DashboardServer } from "@squidclaw/canvas";
 import { TelegramSurface, WhatsAppSurface } from "@squidclaw/surfaces";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { chooseMind, requireEnv } from "./boot.js";
+import { chooseMind, habitRunner, requireEnv } from "./boot.js";
 import { Platform } from "./platform.js";
 
 /**
@@ -140,6 +140,18 @@ const dashboard = new DashboardServer(
       createSession: (tenantId) => platform.logins.createSession(tenantId),
       sessionTenant: (sid) => platform.logins.sessionTenant(sid),
       sourcesFor: (tenantId) => platform.sourcesFor(tenantId),
+    },
+    // Running a habit from the canvas takes the same road as a webhook firing:
+    // one runner, one quota, one journal — so a flow behaves identically
+    // whether a human pressed the button or a reflex fired it.
+    run: async (tenantId, name, args) => {
+      if (!tenantId) throw new Error("the admin master view has no tenant to run as — sign in with /canvas");
+      const denied = platform.tenants.checkQuota(tenantId, "habit");
+      if (denied) throw new Error(denied);
+      const organism = await platform.organismFor(tenantId);
+      const result = await habitRunner(organism, (m) => console.log(`[${tenantId}] ${m}`))(name, args);
+      platform.tenants.record(tenantId, "habit");
+      return result;
     },
   },
 );

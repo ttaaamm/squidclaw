@@ -49,7 +49,10 @@ async function uploadMedia(url: string, auth: string, bin: BinaryValue): Promise
       "content-type": meta.mimeType ?? "image/png",
       "content-disposition": `attachment; filename="${meta.fileName ?? "image.png"}"`,
     },
-    body: buf,
+    // Buffer is a valid fetch body at runtime. The cast is needed because TS
+    // 5.7 made typed arrays generic over their backing buffer, so neither
+    // Buffer nor Uint8Array structurally matches BufferSource any more.
+    body: buf as unknown as BodyInit,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`WordPress media upload ${res.status}: ${(await res.text()).slice(0, 200)}`);

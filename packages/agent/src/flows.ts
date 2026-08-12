@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { executeGraph, type Graph, type Journal, type NodeDef } from "@squidclaw/kernel";
 
@@ -198,9 +198,40 @@ export class FlowStore {
   }
 
   saveDraft(flow: Flow): string {
-    const path = join(this.draftsDir, `${flow.name}.flow.json`);
-    writeFileSync(path, `${JSON.stringify({ ...flow, status: "draft" }, null, 2)}\n`, "utf8");
+    return this.save(flow, "draft");
+  }
+
+  /**
+   * Write a flow at a chosen status.
+   *
+   * Editing has to be able to reach a promoted habit — the canvas lets a human
+   * fix a live flow — but promotion itself stays a separate, deliberate act
+   * (`promote`), so saving an edit never silently arms a draft.
+   */
+  save(flow: Flow, status: "draft" | "promoted" = "draft"): string {
+    const dir = status === "promoted" ? this.dir : this.draftsDir;
+    const path = join(dir, `${flow.name}.flow.json`);
+    writeFileSync(path, `${JSON.stringify({ ...flow, status }, null, 2)}\n`, "utf8");
     return path;
+  }
+
+  /**
+   * Forget a habit entirely — both the draft and the promoted copy, plus the
+   * `.promoted` tombstone `promote()` leaves behind. Returns whether anything
+   * was actually there, so a caller can answer 404 honestly.
+   */
+  remove(name: string): boolean {
+    let removed = false;
+    for (const path of [
+      join(this.dir, `${name}.flow.json`),
+      join(this.draftsDir, `${name}.flow.json`),
+      join(this.draftsDir, `${name}.flow.json.promoted`),
+    ]) {
+      if (!existsSync(path)) continue;
+      unlinkSync(path);
+      removed = true;
+    }
+    return removed;
   }
 
   /** The human's yes. Only promoted habits are ever offered as tools. */

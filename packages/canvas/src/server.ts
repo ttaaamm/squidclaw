@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFileSync } from "node:fs";
 import { layoutRadial } from "./layout.js";
 import { dashboardState, executionDetail, executionList, type Sources } from "./api.js";
+import type { Flow } from "@squidclaw/agent";
 import { PAGE } from "./page.js";
 import { resolveAssetPath } from "./assets.js";
 import { safeEqual } from "@squidclaw/tenants";
@@ -25,7 +26,19 @@ export interface DashboardOptions {
     sessionTenant(sid: string): string | undefined;
     sourcesFor(tenantId: string): Sources | undefined;
   };
+  /**
+   * Runs a habit for a tenant. Injected because `habitRunner` lives in the
+   * server package, which depends on this one — importing it here would invert
+   * that. Absent (single-user dev, tests) the run endpoint answers 501.
+   */
+  run?(tenantId: string | undefined, name: string, args: Record<string, unknown>): Promise<unknown>;
 }
+
+/**
+ * Flow names become file names, so anything that could climb out of the
+ * workspace is refused outright. `..` and separators can never match.
+ */
+const SAFE_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
  * Serves the window into the agent's mind — read-only, by design.
@@ -140,9 +153,44 @@ export class DashboardServer {
       return found ? this.send(res, 200, found) : this.send(res, 404, { error: "no such execution" });
     }
 
+    // Create: the canvas (or the agent, through it) writes a new habit. New
+    // work always lands as a draft — arming it is a separate, deliberate act.
+    if (path === "/api/habits" && req.method === "POST") {
+      return void this.write(req, res, async (body) => {
+        const flow = this.asFlow(body);
+        if (typeof flow === "string") return this.send(res, 400, { error: flow });
+        if (src.flows.find(flow.name)) {
+          return this.send(res, 409, { error: `a habit named "${flow.name}" already exists` });
+        }
+        src.flows.save(flow, "draft");
+        this.send(res, 201, { ok: true, name: flow.name, status: "draft" });
+      });
+    }
+
     const habit = path.match(/^\/api\/habits\/([\w.-]+)$/);
     if (habit) {
-      const flow = src.flows.find(decodeURIComponent(habit[1]));
+      const name = decodeURIComponent(habit[1]);
+      const flow = src.flows.find(name);
+
+      if (req.method === "DELETE") {
+        const gone = src.flows.remove(name);
+        return this.send(res, gone ? 200 : 404, gone ? { ok: true, name } : { error: "no such habit" });
+      }
+
+      // Edit in place. A promoted habit stays promoted — a human fixing a live
+      // flow should not have to re-arm it — but promotion is never granted here.
+      if (req.method === "PATCH") {
+        if (!flow) return this.send(res, 404, { error: "no such habit" });
+        return void this.write(req, res, async (body) => {
+          const merged = this.asFlow({ ...flow, ...body, name: flow.name });
+          if (typeof merged === "string") return this.send(res, 400, { error: merged });
+          src.flows.save(merged, flow.status);
+          this.send(res, 200, { ok: true, name: flow.name, status: flow.status });
+        });
+      }
+
+      if (req.method && req.method !== "GET") return this.send(res, 405, { error: "use GET, PATCH or DELETE" });
+
       if (!flow) return this.send(res, 404, { error: "no such habit" });
       return this.send(res, 200, {
         ...flow,
@@ -151,9 +199,83 @@ export class DashboardServer {
       });
     }
 
+    const action = path.match(/^\/api\/habits\/([\w.-]+)\/(run|promote)$/);
+    if (action) {
+      const name = decodeURIComponent(action[1]);
+      if (req.method !== "POST") return this.send(res, 405, { error: "use POST" });
+      if (!src.flows.find(name)) return this.send(res, 404, { error: "no such habit" });
+
+      if (action[2] === "promote") {
+        const armed = src.flows.promote(name);
+        return this.send(res, armed ? 200 : 409,
+          armed ? { ok: true, name, status: "promoted" } : { error: "no draft to promote" });
+      }
+
+      if (!this.opts.run) return this.send(res, 501, { error: "this server cannot run habits" });
+      return void this.write(req, res, async (body) => {
+        try {
+          const result = await this.opts.run!(resolved.tenantId, name, body as Record<string, unknown>);
+          this.send(res, 200, { ok: true, name, result });
+        } catch (err) {
+          this.send(res, 500, { ok: false, error: String(err instanceof Error ? err.message : err) });
+        }
+      });
+    }
+
     if (path === "/api/events") return this.stream(res, src);
 
     this.send(res, 404, { error: "not found" });
+  }
+
+  /** Reads a JSON body, capped, then hands it to the route. */
+  private write(
+    req: IncomingMessage,
+    res: ServerResponse,
+    then: (body: Record<string, unknown>) => Promise<void>,
+  ): void {
+    let raw = "";
+    let tooBig = false;
+    req.on("data", (chunk: Buffer) => {
+      if (tooBig) return;
+      raw += chunk;
+      if (raw.length > 2_000_000) {
+        tooBig = true;
+        this.send(res, 413, { error: "body too large" });
+      }
+    });
+    req.on("end", () => {
+      if (tooBig) return;
+      let body: Record<string, unknown>;
+      try {
+        body = raw.trim() ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      } catch {
+        return this.send(res, 400, { error: "body must be JSON" });
+      }
+      void then(body).catch((err) => this.send(res, 500, { error: String(err) }));
+    });
+  }
+
+  /** Validates an incoming flow. Returns the flow, or why it was refused. */
+  private asFlow(body: Record<string, unknown>): Flow | string {
+    const name = String(body.name ?? "").trim();
+    if (!name) return "name is required";
+    if (!SAFE_NAME.test(name)) return "name may only contain letters, numbers, dash and underscore";
+
+    const graph = body.graph as Flow["graph"] | undefined;
+    if (!graph || !Array.isArray(graph.nodes)) return "graph.nodes is required";
+    if (!Array.isArray(graph.edges)) return "graph.edges is required";
+
+    return {
+      name,
+      description: String(body.description ?? ""),
+      signature: String(body.signature ?? `ui:${name}`),
+      triggers: Array.isArray(body.triggers) ? (body.triggers as string[]) : [],
+      params: Array.isArray(body.params) ? (body.params as Flow["params"]) : [],
+      graph,
+      runs: Number(body.runs ?? 0),
+      createdAt: String(body.createdAt ?? new Date().toISOString()),
+      status: "draft",
+    };
   }
 
   private stream(res: ServerResponse, src: Sources): void {
